@@ -26,6 +26,23 @@
   50% { top: calc(100% - 2px); }
 }
 
+@keyframes float1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -20px) scale(1.05); }
+  66% { transform: translate(-20px, 30px) scale(0.95); }
+}
+
+@keyframes float2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-40px, 20px) scale(1.1); }
+  66% { transform: translate(30px, -30px) scale(0.9); }
+}
+
+@keyframes float3 {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.15); }
+}
+
 .animate-scan {
   animation: scan 2s ease-in-out infinite;
 }
@@ -80,108 +97,141 @@
   box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
 }
 
-/* ── macOS Dock Magnification (Exact Advanced CSS Physics) ─────────────────────── */
+/* ── macOS Dock Magnification (EXACT CSS from Prompt) ─────────────────────── */
+
+:root {
+  --trans: .4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 
 .dock-container {
-  --w: 3.5rem;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2), 0 0 1em 1em rgba(0, 0, 0, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 1.5rem;
-  height: var(--w);
-  overflow-x: visible;
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.2);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 2rem;
+  padding: 0.5rem 1rem;
   display: flex;
-  flex-direction: row;
-  justify-content: center;
   align-items: flex-end;
-  transition: width var(--trans);
-  z-index: 100;
-  padding: 0 1rem;
-}
-
-.dock-container:hover {
-  width: calc(10 * var(--w));
-}
-
-.dock-container.mobile-dock {
-  position: relative;
-  bottom: auto;
-  left: auto;
-  transform: none;
-  overflow-x: auto;
-  width: auto;
-  max-width: 95vw;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.dock-container.mobile-dock::-webkit-scrollbar {
-  display: none;
-}
-
-.dock-icon {
-  position: relative;
-  min-width: var(--w);
-  height: 100%;
-  transform-origin: bottom;
+  gap: 0.5rem;
   transition: var(--trans);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  cursor: pointer;
-  z-index: 10;
+  z-index: 200;
 }
 
-/* Exact Mathematical Magnification Physics */
-.dock-icon:hover {
-  scale: 2.7;
-  margin-inline: 1.5rem;
-  z-index: 50;
+/* Desktop Physics */
+@media (min-width: 768px) {
+  .dock-container {
+    position: absolute;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    height: 4.5rem;
+  }
+
+  .dock-icon {
+    width: 3.5rem;
+    height: 3.5rem;
+    transform-origin: bottom;
+    transition: var(--trans);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    position: relative;
+  }
+
+  /* Magnification Physics */
+  .dock-icon:hover {
+    scale: 2.0;
+    margin-inline: 1.2rem;
+    z-index: 50;
+  }
+
+  .dock-icon:hover + .dock-icon,
+  .dock-icon:has(+ .dock-icon:hover) {
+    scale: 1.6;
+    margin-inline: 0.6rem;
+    z-index: 40;
+  }
+
+  .dock-icon:hover + .dock-icon + .dock-icon,
+  .dock-icon:has(+ .dock-icon + .dock-icon:hover) {
+    scale: 1.3;
+    margin-inline: 0.3rem;
+    z-index: 30;
+  }
 }
 
-.dock-icon:hover + .dock-icon,
-.dock-icon:has(+ .dock-icon:hover) {
-  scale: 2.2;
-  margin-inline: 0.8rem;
-  z-index: 40;
+/* Mobile Physics */
+@media (max-width: 767px) {
+  .dock-container {
+    position: fixed;
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    height: auto;
+    padding: 0.75rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .dock-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dock-icon {
+    width: 3rem;
+    height: 3rem;
+    flex-shrink: 0;
+    scroll-snap-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Disable hover magnification on mobile */
+  .dock-icon:hover,
+  .dock-icon:hover + .dock-icon,
+  .dock-icon:has(+ .dock-icon:hover),
+  .dock-icon:hover + .dock-icon + .dock-icon,
+  .dock-icon:has(+ .dock-icon + .dock-icon:hover) {
+    scale: 1;
+    margin-inline: 0;
+  }
 }
 
-.dock-icon:hover + .dock-icon + .dock-icon,
-.dock-icon:has(+ .dock-icon + .dock-icon:hover) {
-  scale: 1.8;
-  margin-inline: 0.5rem;
-  z-index: 30;
-}
-
-.dock-icon:hover + .dock-icon + .dock-icon + .dock-icon,
-.dock-icon:has(+ .dock-icon + .dock-icon + .dock-icon:hover) {
-  scale: 1.3;
-  margin-inline: 0.2rem;
-  z-index: 20;
-}
-
+/* Squircle icon container */
 .dock-icon-inner {
-  width: 80%;
-  aspect-ratio: 1 / 1;
-  border-radius: 0.75rem;
+  width: 100%;
+  height: 100%;
+  border-radius: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: 0.15s linear;
-  margin-bottom: 0.2rem;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  transition: 0.15s linear;
 }
 
 .dock-icon:active .dock-icon-inner {
-  transform: translateY(0.1rem);
+  transform: translateY(0.1rem) scale(0.95);
+}
+
+/* Active indicator dot */
+.dock-indicator {
+  position: absolute;
+  bottom: -0.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 8px white, 0 0 12px rgba(255, 255, 255, 0.5);
 }
 
 /* Tooltip Text */
@@ -207,6 +257,48 @@
   transition: opacity 0.2s ease;
   white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@media (min-width: 768px) {
+  .dock-icon:hover .dock-text {
+    opacity: 1;
+  }
+}
+
+/* ── Liquid Glass 4.0 Window Styling ─────────────────────────────────────── */
+
+.window-glass {
+  background: rgba(10, 17, 32, 0.60);
+  backdrop-filter: blur(40px) saturate(1.15);
+  -webkit-backdrop-filter: blur(40px) saturate(1.15);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 0 1em 1em rgba(0, 0, 0, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.20),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.25);
+}
+
+.window-glass-inactive {
+  background: rgba(10, 17, 32, 0.50);
+  backdrop-filter: blur(30px) saturate(1.05);
+  -webkit-backdrop-filter: blur(30px) saturate(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.5),
+    0 0 0.5em 0.5em rgba(0, 0, 0, 0.15),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+.glass-dark {
+  background: rgba(10, 17, 32, 0.70);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+}
+
+.liquid-edge {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.20);
 }
 
 .dock-text::after {
@@ -242,53 +334,12 @@
 
 .dock-separator {
   width: 1px;
-  height: 1.5rem;
+  height: 2rem;
   background: rgba(255, 255, 255, 0.15);
-  margin: 0 0.5rem;
+  margin: 0 0.25rem;
   flex-shrink: 0;
   align-self: center;
-}
-
-/* Mobile dock override */
-.dock-container.mobile-dock .dock-icon:hover {
-  scale: 1.15;
-  margin-inline: 0.1rem;
-}
-
-.dock-container.mobile-dock .dock-icon:hover + .dock-icon,
-.dock-container.mobile-dock .dock-icon:has(+ .dock-icon:hover) {
-  scale: 1.05;
-  margin-inline: 0;
-}
-
-/* ── Window Liquid Glass Styling ─────────────────────────────────────── */
-
-.window-glass {
-  background: rgba(13, 13, 18, 0.88);
-  backdrop-filter: blur(40px) saturate(1.15);
-  -webkit-backdrop-filter: blur(40px) saturate(1.15);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.85),
-    0 0 1em 1em rgba(0, 0, 0, 0.3),
-    inset 0 1px 1px rgba(255, 255, 255, 0.15),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.25);
-}
-
-.window-glass-inactive {
-  background: rgba(13, 13, 18, 0.78);
-  backdrop-filter: blur(30px) saturate(1.05);
-  -webkit-backdrop-filter: blur(30px) saturate(1.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.5),
-    0 0 0.5em 0.5em rgba(0, 0, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.08);
-}
-
-.titlebar-glass {
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1px;
 }
 
 /* ── Mount Animations ───────────────────────────────────────────── */
@@ -467,6 +518,150 @@
 .status-dot.offline {
   background: #ef4444;
   box-shadow: 0 0 8px #ef4444;
+}
+
+/* ── Boot Sequence ───────────────────────────────────────────── */
+
+@keyframes boot-fade {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+@keyframes boot-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+@keyframes boot-bar {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+.boot-screen {
+  animation: boot-fade 2.4s ease-in-out forwards;
+}
+
+.boot-logo {
+  animation: boot-pulse 1.6s ease-in-out infinite;
+}
+
+.boot-progress {
+  animation: boot-bar 2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* ── Skeleton Shimmer (Liquid Glass) ──────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-glass {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.10) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0.75rem;
+}
+
+/* ── Retinal Scan Laser ───────────────────────────────────────────── */
+
+@keyframes retinal-scan {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.retinal-laser {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.9) 50%,
+    transparent 100%
+  );
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.8), 0 0 24px rgba(139, 92, 246, 0.4);
+  animation: retinal-scan 2.2s ease-in-out infinite;
+}
+
+/* ── Void Protocol Alert ──────────────────────────────────────────── */
+
+@keyframes void-flicker {
+  0%, 100% { opacity: 1; text-shadow: 0 0 10px rgba(239, 68, 68, 0.8); }
+  50% { opacity: 0.7; text-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
+}
+
+.void-alert {
+  animation: void-flicker 1.2s ease-in-out infinite;
+}
+
+/* ── Sovereign Wallpaper Starfield ──────────────────────────────────── */
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes drift {
+  from { transform: translateY(0); }
+  to { transform: translateY(-2000px); }
+}
+
+.wallpaper-stars-sm {
+  background-image:
+    radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.8), transparent),
+    radial-gradient(1px 1px at 60px 70px, rgba(255,255,255,0.5), transparent),
+    radial-gradient(1px 1px at 120px 150px, rgba(255,255,255,0.6), transparent),
+    radial-gradient(1px 1px at 200px 90px, rgba(255,255,255,0.4), transparent),
+    radial-gradient(1px 1px at 280px 200px, rgba(255,255,255,0.7), transparent),
+    radial-gradient(1px 1px at 350px 50px, rgba(255,255,255,0.5), transparent),
+    radial-gradient(1px 1px at 420px 180px, rgba(255,255,255,0.6), transparent),
+    radial-gradient(1px 1px at 500px 120px, rgba(255,255,255,0.4), transparent);
+  background-size: 550px 220px;
+  background-repeat: repeat;
+  animation: twinkle 4s ease-in-out infinite;
+}
+
+.wallpaper-stars-md {
+  background-image:
+    radial-gradient(1.5px 1.5px at 100px 200px, rgba(200,230,255,0.7), transparent),
+    radial-gradient(1.5px 1.5px at 300px 100px, rgba(200,230,255,0.5), transparent),
+    radial-gradient(1.5px 1.5px at 500px 300px, rgba(200,230,255,0.6), transparent),
+    radial-gradient(1.5px 1.5px at 700px 150px, rgba(200,230,255,0.4), transparent),
+    radial-gradient(1.5px 1.5px at 900px 250px, rgba(200,230,255,0.7), transparent);
+  background-size: 1000px 400px;
+  background-repeat: repeat;
+  animation: twinkle 6s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.wallpaper-stars-lg {
+  background-image:
+    radial-gradient(2px 2px at 150px 100px, rgba(255,255,255,0.9), transparent),
+    radial-gradient(2px 2px at 450px 300px, rgba(180,220,255,0.7), transparent),
+    radial-gradient(2px 2px at 750px 200px, rgba(255,240,200,0.6), transparent),
+    radial-gradient(2px 2px at 1050px 400px, rgba(200,200,255,0.5), transparent);
+  background-size: 1200px 500px;
+  background-repeat: repeat;
+  animation: twinkle 8s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+@media (max-width: 767px) {
+  .wallpaper-stars-sm { background-size: 300px 150px; opacity: 0.7; }
+  .wallpaper-stars-md { background-size: 600px 300px; opacity: 0.6; }
+  .wallpaper-stars-lg { background-size: 800px 400px; opacity: 0.5; }
 }
 
 /* ── Smooth transitions for all interactive elements ───────────────────── */

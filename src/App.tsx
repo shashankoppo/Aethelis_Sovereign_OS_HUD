@@ -16,8 +16,16 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import type {
-  LedgerTransaction, LogisticsOrder, MarketModule, SystemEvent
+  LedgerTransaction, LogisticsOrder, MarketModule, SystemEvent,
+  SystemLog, SovereignAsset, OracleMemory, VaultFile
 } from './lib/supabase';
+import {
+  COMPUTE_ENGINES, DEFAULT_ORACLE_CONFIG, generateOracleResponse, detectToolCall,
+  elsxSyncCoreNodes, elsxFetchLeads, elsxFetchShipments, elsxFetchAllocations,
+  wpFetchNodes, wpToggleProxy,
+  web3GenerateBlock, web3FetchBalance,
+} from './lib/api';
+import type { OracleConfig, ElsxLead, ElsxShipment, ElsxAllocation, ProxyNode, BlockEvent, AthBalance } from './lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +47,7 @@ const APPS: Record<string, AppConfig> = {
   ENTERPRISE:{ id: 'enterprise',title: 'ELSX Enterprise',   icon: Network,     color: 'text-violet-400', bg: 'bg-violet-600', gradient: 'from-violet-500 to-purple-700', desc: 'Business operations suite' },
   MARKET:    { id: 'market',    title: 'Omni-Market',       icon: ShoppingBag, color: 'text-emerald-400',bg: 'bg-emerald-500',gradient: 'from-emerald-500 to-teal-600', desc: 'Module marketplace' },
   LEDGER:    { id: 'ledger',    title: 'Sovereign Ledger',  icon: Coins,       color: 'text-amber-400',  bg: 'bg-amber-500',  gradient: 'from-amber-400 to-orange-600', desc: 'Decentralized economy' },
-  ORACLE:    { id: 'oracle',    title: 'Gemini Oracle',     icon: Sparkles,    color: 'text-purple-400', bg: 'bg-purple-600', gradient: 'from-purple-500 to-violet-700', desc: 'AI prophetic interface' },
+  ORACLE:    { id: 'oracle',    title: 'Q-Bit Core',        icon: Sparkles,    color: 'text-purple-400', bg: 'bg-purple-600', gradient: 'from-purple-500 to-violet-700', desc: 'AI prophetic interface' },
   EMULATOR:  { id: 'emulator',  title: 'Omni-Emulator',    icon: Smartphone,  color: 'text-cyan-400',   bg: 'bg-cyan-500',   gradient: 'from-cyan-500 to-sky-600', desc: 'Virtual environment' },
   NEXUS:     { id: 'nexus',     title: 'Kali-Nexus',       icon: ShieldAlert, color: 'text-red-400',    bg: 'bg-red-600',    gradient: 'from-red-600 to-rose-700', desc: 'Security & pentest' },
   VAULT:     { id: 'vault',     title: 'Bio-Pulse Vault',  icon: Fingerprint, color: 'text-violet-400', bg: 'bg-violet-700', gradient: 'from-violet-600 to-fuchsia-700', desc: 'Biometric archives' },
@@ -194,10 +202,18 @@ export default function AethelisOS() {
   const [logistics,  setLogistics]  = useState<LogisticsOrder[]>([]);
   const [modules,    setModules]    = useState<MarketModule[]>([]);
   const [dbLoading,  setDbLoading]  = useState(true);
+  const [dbError,    setDbError]    = useState(false);
+  const [isBooting,  setIsBooting]  = useState(true);
+
+  // Phase 5 persistence
+  const [systemLogs,   setSystemLogs]   = useState<SystemLog[]>([]);
+  const [sovereignAssets, setSovereignAssets] = useState<SovereignAsset | null>(null);
+  const [vaultFiles,   setVaultFiles]   = useState<VaultFile[]>([]);
+  const [vaultLoading, setVaultLoading] = useState(false);
+  const [vaultAuthed,  setVaultAuthed]  = useState(false);
 
   // App-specific
   const [enterpriseTab,  setEnterpriseTab]  = useState<'Logistics'|'CRM'|'Wealth'|'System'>('Logistics');
-  const [vaultUnlocked,  setVaultUnlocked]  = useState(false);
   const [scanProgress,   setScanProgress]   = useState(false);
   const [emulatorEnv,    setEmulatorEnv]    = useState('iOS');
   const [emulatorBooted, setEmulatorBooted] = useState(false);
@@ -231,6 +247,20 @@ export default function AethelisOS() {
     { role: 'oracle', text: 'I am the Oracle of Aethelis. Ask, and the prophetic circuits shall reveal.' }
   ]);
   const [oracleLoading,  setOracleLoading] = useState(false);
+  const [oracleConfig,  setOracleConfig]  = useState<OracleConfig>(DEFAULT_ORACLE_CONFIG);
+  const [oraclePanelOpen, setOraclePanelOpen] = useState(false);
+
+  // Phase 6 integration state
+  const [elsxLeads,       setElsxLeads]       = useState<ElsxLead[]>([]);
+  const [elsxShipments,   setElsxShipments]   = useState<ElsxShipment[]>([]);
+  const [elsxAllocations, setElsxAllocations] = useState<ElsxAllocation[]>([]);
+  const [elsxSyncing,     setElsxSyncing]     = useState(false);
+  const [elsxLoading,     setElsxLoading]     = useState(true);
+  const [wpNodes,         setWpNodes]         = useState<ProxyNode[]>([]);
+  const [wpLoading,       setWpLoading]       = useState(true);
+  const [wpToggling,      setWpToggling]      = useState<string | null>(null);
+  const [blockTicker,     setBlockTicker]     = useState<BlockEvent[]>([]);
+  const [athLive,         setAthLive]         = useState<AthBalance | null>(null);
 
   const termEndRef = useRef<HTMLDivElement>(null);
   const oracleEndRef = useRef<HTMLDivElement>(null);
@@ -239,19 +269,29 @@ export default function AethelisOS() {
 
   const fetchAll = useCallback(async () => {
     setDbLoading(true);
+    setDbError(false);
     try {
-      const [ev, led, log, mod] = await Promise.all([
+      const [ev, led, log, mod, slog, sa, om] = await Promise.all([
         supabase.from('system_events').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('ledger_transactions').select('*').order('created_at', { ascending: false }).limit(50),
         supabase.from('logistics_orders').select('*').order('created_at', { ascending: false }),
         supabase.from('market_modules').select('*').order('module_name'),
+        supabase.from('system_logs').select('*').order('created_at', { ascending: false }).limit(60),
+        supabase.from('sovereign_assets').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('oracle_memory').select('*').order('created_at', { ascending: true }).limit(50),
       ]);
       if (ev.data)  setEvents(ev.data as SystemEvent[]);
       if (led.data) setLedger(led.data as LedgerTransaction[]);
       if (log.data) setLogistics(log.data as LogisticsOrder[]);
       if (mod.data) setModules(mod.data as MarketModule[]);
+      if (slog.data) setSystemLogs(slog.data as SystemLog[]);
+      if (sa.data)  setSovereignAssets(sa.data as SovereignAsset);
+      if (om.data) {
+        const mapped = (om.data as OracleMemory[]).map(m => ({ role: m.role, text: m.content }));
+        if (mapped.length) setOracleMessages(mapped);
+      }
     } catch {
-      // Network error — UI shows empty states gracefully
+      setDbError(true);
     } finally {
       setDbLoading(false);
     }
@@ -347,15 +387,37 @@ export default function AethelisOS() {
     fetchAll();
     openApp(APPS.DASHBOARD);
 
+    // Boot sequence: hold the boot screen while the DB connection establishes
+    const bootTimer = setTimeout(() => setIsBooting(false), 2400);
+
+    // Block ticker seed
+    const blockInterval = setInterval(() => {
+      setBlockTicker(prev => [web3GenerateBlock(), ...prev].slice(0, 8));
+    }, 4000);
+
+    // Realtime subscription: system_logs appear instantly in Kernel terminal
+    const logChannel = supabase
+      .channel('system_logs_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_logs' }, (payload) => {
+        const newLog = payload.new as SystemLog;
+        setSystemLogs(prev => [newLog, ...prev].slice(0, 60));
+      })
+      .subscribe();
+
     return () => {
       window.removeEventListener('resize', checkMobile);
       clearInterval(timer);
       clearInterval(statTimer);
       if (ws) ws.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearTimeout(bootTimer);
+      supabase.removeChannel(logChannel);
+      clearInterval(blockInterval);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Phase 6: integration fetches moved below function declarations to avoid TDZ
 
   useEffect(() => { termEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [termHistory]);
   useEffect(() => { oracleEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [oracleMessages]);
@@ -412,7 +474,7 @@ export default function AethelisOS() {
     setWindows(p => p.filter(w => w.id !== id));
     setMinimized(p => p.filter(m => m !== id));
     if (activeWindowId === id) setActiveWindowId(null);
-    if (id === 'vault') setVaultUnlocked(false);
+    if (id === 'vault') { setVaultAuthed(false); setVaultFiles([]); }
   };
 
   const toggleMaximize = (id: string) => {
@@ -506,6 +568,7 @@ export default function AethelisOS() {
       case 'scan':
         next.push({ type: 'info', text: 'Initiating subnet scan... routing through Nexus bridge.' });
         next.push({ type: 'sys', text: '12 nodes detected. 10 secured. 2 flagged.' });
+        logSystem('kernel', 'info', 'Subnet scan executed: 12 nodes detected, 2 flagged.');
         break;
       case 'ledger':
         ledger.slice(0, 3).forEach(tx => {
@@ -524,6 +587,81 @@ export default function AethelisOS() {
   };
 
   // ─── DB Actions ──────────────────────────────────────────────────
+
+  const logSystem = useCallback(async (source: SystemLog['source'], level: SystemLog['level'], message: string) => {
+    const { data } = await supabase.from('system_logs').insert({ source, level, message }).select().single();
+    if (data) setSystemLogs(prev => [data as SystemLog, ...prev].slice(0, 60));
+  }, []);
+
+  const handleVaultAuth = useCallback(async () => {
+    setVaultLoading(true);
+    logSystem('vault', 'info', 'Retinal sync initiated. Authenticating via Supabase zero-trust gateway...');
+    try {
+      const { error } = await supabase.auth.signInAnonymously();
+      if (error) throw error;
+      await new Promise(r => setTimeout(r, 2200));
+      const { data, error: fErr } = await supabase.from('vault_files').select('*').order('created_at', { ascending: true });
+      if (fErr) throw fErr;
+      setVaultFiles(data as VaultFile[]);
+      setVaultAuthed(true);
+      logSystem('vault', 'sys', 'Bio-Pulse Vault unlocked. Zero-trust handshake complete.');
+    } catch {
+      logSystem('vault', 'err', 'VOID-PROTOCOL: Retinal sync failed. Authentication rejected.');
+    } finally {
+      setVaultLoading(false);
+    }
+  }, [logSystem]);
+
+  // ─── Phase 6 Integration Fetchers ────────────────────────────────
+
+  const fetchElsxCore = useCallback(async () => {
+    setElsxLoading(true);
+    const [leads, shipments, allocations] = await Promise.all([
+      elsxFetchLeads(), elsxFetchShipments(), elsxFetchAllocations(),
+    ]);
+    setElsxLeads(leads);
+    setElsxShipments(shipments);
+    setElsxAllocations(allocations);
+    setElsxLoading(false);
+  }, []);
+
+  const handleElsxSync = useCallback(async () => {
+    setElsxSyncing(true);
+    logSystem('nexus', 'info', 'ELSX Core sync initiated. Bridging subjugated ERP nodes...');
+    await fetchElsxCore();
+    const result = await elsxSyncCoreNodes();
+    logSystem('nexus', 'sys', `ELSX sync complete: ${result.leads} leads, ${result.shipments} shipments, ${result.allocations} allocations.`);
+    setElsxSyncing(false);
+  }, [fetchElsxCore, logSystem]);
+
+  const fetchWpNodes = useCallback(async () => {
+    setWpLoading(true);
+    const nodes = await wpFetchNodes();
+    setWpNodes(nodes);
+    setWpLoading(false);
+  }, []);
+
+  const handleWpToggle = useCallback(async (nodeId: string, enabled: boolean) => {
+    setWpToggling(nodeId);
+    logSystem('nexus', 'info', `Omni-Market proxy ${enabled ? 'armed' : 'disarmed'} on node ${nodeId}.`);
+    await wpToggleProxy(nodeId, enabled);
+    setWpNodes(prev => prev.map(n => n.id === nodeId ? { ...n, proxyEnabled: enabled, status: enabled ? 'online' : 'offline' } : n));
+    setWpToggling(null);
+  }, [logSystem]);
+
+  const fetchAthLive = useCallback(async () => {
+    const baseBalance = sovereignAssets?.ath_balance ?? 124500;
+    const baseNfts = sovereignAssets?.nft_count ?? 42;
+    const live = await web3FetchBalance(baseBalance, baseNfts);
+    setAthLive(live);
+  }, [sovereignAssets]);
+
+  // Phase 6: integration fetches
+  useEffect(() => {
+    fetchElsxCore();
+    fetchWpNodes();
+    fetchAthLive();
+  }, [fetchElsxCore, fetchWpNodes, fetchAthLive]);
 
   const addLedgerTx = async () => {
     if (!ledgerForm.label || !ledgerForm.amount) return;
@@ -586,19 +724,22 @@ export default function AethelisOS() {
     setOracleMessages(p => [...p, { role: 'user', text: userMsg }]);
     setOracleLoading(true);
 
-    // Simulated AI responses (replace with real Gemini API if configured)
-    const responses = [
-      "The circuits foresee a convergence of sovereign protocols. Your query echoes through the planetary mesh.",
-      "In the shadow of obsolete giants, a new architecture rises. The answer you seek lies in decentralization.",
-      "The void-protocols have analyzed your request. Execute with precision, and the network shall reward.",
-      "Through the bio-pulse resonance, I divine: Your path aligns with the zero-staff paradigm.",
-      "The ledger trembles with anticipation. Your vision shall manifest through automated workflows.",
-    ];
+    await supabase.from('oracle_memory').insert({ role: 'user', content: userMsg });
 
-    await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
-    setOracleMessages(p => [...p, { role: 'oracle', text: responses[Math.floor(Math.random() * responses.length)] }]);
+    const { text: oracleReply, toolCall } = await generateOracleResponse(userMsg, oracleConfig);
+
+    let displayText = oracleReply;
+    if (toolCall && toolCall.tool !== 'none') {
+      const toolLabel = toolCall.tool === 'elsx_fetch_leads' ? 'ELSX Core'
+        : toolCall.tool === 'wp_toggle_proxy' ? 'Omni-Market'
+        : 'Sovereign Chain';
+      displayText = `[Tool: ${toolLabel}] ${oracleReply}`;
+    }
+
+    setOracleMessages(p => [...p, { role: 'oracle', text: displayText }]);
+    await supabase.from('oracle_memory').insert({ role: 'oracle', content: displayText });
     setOracleLoading(false);
-    addSystemEvent('Oracle query processed', 'system');
+    addSystemEvent('Q-Bit Core query processed', 'system');
   };
 
   // ─── App Content ─────────────────────────────────────────────────
@@ -779,7 +920,7 @@ export default function AethelisOS() {
         </div>
       );
 
-      // ── Oracle (Gemini AI) ──────────────────────────────────────────────────
+      // ── Oracle (Q-Bit Core) ──────────────────────────────────────────────────
       case 'oracle': return (
         <div className="h-full flex flex-col bg-gradient-to-b from-purple-950/30 to-slate-950/95 text-white">
           {/* Header - Mobile responsive */}
@@ -792,14 +933,105 @@ export default function AethelisOS() {
                 <div className="absolute -inset-1 rounded-lg sm:rounded-xl bg-purple-500/20 blur-md -z-10"></div>
               </div>
               <div className="flex-1 min-w-0">
-                <h2 className="text-sm font-semibold">Gemini Oracle</h2>
-                <p className="text-[9px] text-white/40 truncate">Prophetic AI Interface</p>
+                <h2 className="text-sm font-semibold">Q-Bit Core</h2>
+                <p className="text-[9px] text-white/40 truncate">
+                  {COMPUTE_ENGINES.find(e => e.id === oracleConfig.engineId)?.label ?? 'Aethelis Cloud Node'}
+                </p>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span className="text-[9px] text-emerald-400 hidden sm:inline">Connected</span>
+                <span className={`w-2 h-2 rounded-full ${oracleConfig.qbitFallback ? 'bg-amber-400' : 'bg-emerald-400'} animate-pulse`}></span>
+                <span className={`text-[9px] hidden sm:inline ${oracleConfig.qbitFallback ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {oracleConfig.qbitFallback ? 'Q-Bit Sim' : 'Connected'}
+                </span>
+                <button onClick={() => setOraclePanelOpen(o => !o)}
+                  className="ml-1 p-2 rounded-lg hover:bg-white/10 transition-colors min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center">
+                  <Settings size={16} className="text-white/50" />
+                </button>
               </div>
             </div>
+
+            {/* Parameter Control Panel */}
+            {oraclePanelOpen && (
+              <div className="mt-3 sm:mt-4 card-glass rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4 border border-white/[0.07]">
+                {/* Engine Switch */}
+                <div>
+                  <label className="text-[9px] uppercase tracking-wider text-white/40 mb-1.5 block">Compute Engine</label>
+                  <select
+                    value={oracleConfig.engineId}
+                    onChange={e => setOracleConfig(c => ({ ...c, engineId: e.target.value }))}
+                    className="w-full input-glass rounded-lg px-3 py-2.5 text-[11px] text-white/85 outline-none min-h-[44px] bg-slate-900/80"
+                  >
+                    {COMPUTE_ENGINES.map(eng => (
+                      <option key={eng.id} value={eng.id} className="bg-slate-900">{eng.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[8px] text-white/30 mt-1">
+                    {COMPUTE_ENGINES.find(e => e.id === oracleConfig.engineId)?.description}
+                  </p>
+                </div>
+
+                {/* Q-Bit Fallback Toggle */}
+                <div className="flex items-center justify-between min-h-[44px]">
+                  <div>
+                    <p className="text-[10px] text-white/70 font-medium">Local Q-Bit Simulation</p>
+                    <p className="text-[8px] text-white/30">Fallback to proprietary neural simulation</p>
+                  </div>
+                  <button
+                    onClick={() => setOracleConfig(c => ({ ...c, qbitFallback: !c.qbitFallback }))}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${oracleConfig.qbitFallback ? 'bg-amber-500/60' : 'bg-white/10'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${oracleConfig.qbitFallback ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+
+                {/* Temperature Slider */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-[9px] uppercase tracking-wider text-white/40">Temperature</label>
+                    <span className="text-[9px] text-purple-400 font-mono">{oracleConfig.temperature.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0" max="2" step="0.05"
+                    value={oracleConfig.temperature}
+                    onChange={e => setOracleConfig(c => ({ ...c, temperature: parseFloat(e.target.value) }))}
+                    className="w-full accent-purple-500 min-h-[44px]" />
+                </div>
+
+                {/* Top-K Slider */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-[9px] uppercase tracking-wider text-white/40">Top-K</label>
+                    <span className="text-[9px] text-purple-400 font-mono">{oracleConfig.topK}</span>
+                  </div>
+                  <input type="range" min="1" max="100" step="1"
+                    value={oracleConfig.topK}
+                    onChange={e => setOracleConfig(c => ({ ...c, topK: parseInt(e.target.value) }))}
+                    className="w-full accent-purple-500 min-h-[44px]" />
+                </div>
+
+                {/* Max Tokens */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-[9px] uppercase tracking-wider text-white/40">Max Output Tokens</label>
+                    <span className="text-[9px] text-purple-400 font-mono">{oracleConfig.maxTokens}</span>
+                  </div>
+                  <input type="range" min="128" max="4096" step="128"
+                    value={oracleConfig.maxTokens}
+                    onChange={e => setOracleConfig(c => ({ ...c, maxTokens: parseInt(e.target.value) }))}
+                    className="w-full accent-purple-500 min-h-[44px]" />
+                </div>
+
+                {/* System Prompt Override */}
+                <div>
+                  <label className="text-[9px] uppercase tracking-wider text-white/40 mb-1.5 block">System Prompt Override</label>
+                  <textarea
+                    value={oracleConfig.systemPrompt}
+                    onChange={e => setOracleConfig(c => ({ ...c, systemPrompt: e.target.value }))}
+                    rows={3}
+                    className="w-full input-glass rounded-lg px-3 py-2.5 text-[10px] text-white/85 outline-none resize-none bg-slate-900/80"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Messages - Better mobile spacing */}
@@ -891,14 +1123,24 @@ export default function AethelisOS() {
             <div className="flex-1 p-3 sm:p-5 md:p-6 flex flex-col overflow-y-auto gap-4">
               <div className="flex justify-between items-center shrink-0">
                 <h2 className="text-lg sm:text-xl font-light text-white/85">{enterpriseTab}</h2>
-                {enterpriseTab === 'Logistics' && (
-                  <button onClick={() => setShowLogAdd(p => !p)}
-                    className="flex items-center gap-1.5 bg-violet-600 active:bg-violet-500 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-[10px] font-semibold transition-all min-h-[44px]">
-                    <Plus size={14} className="sm:hidden"/><Plus size={11} className="hidden sm:inline"/>
-                    <span className="hidden sm:inline">Add Order</span>
-                    <span className="sm:hidden">Add</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleElsxSync}
+                    disabled={elsxSyncing}
+                    className="flex items-center gap-1.5 bg-violet-600/80 active:bg-violet-500 disabled:opacity-50 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-[10px] font-semibold transition-all min-h-[44px]">
+                    <RefreshCw size={14} className={`sm:hidden ${elsxSyncing ? 'animate-spin' : ''}`}/>
+                    <RefreshCw size={11} className={`hidden sm:inline ${elsxSyncing ? 'animate-spin' : ''}`}/>
+                    <span className="hidden sm:inline">{elsxSyncing ? 'Syncing...' : 'Sync Core Nodes'}</span>
+                    <span className="sm:hidden">{elsxSyncing ? 'Sync' : 'Sync'}</span>
                   </button>
-                )}
+                  {enterpriseTab === 'Logistics' && (
+                    <button onClick={() => setShowLogAdd(p => !p)}
+                      className="flex items-center gap-1.5 bg-violet-600 active:bg-violet-500 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-[10px] font-semibold transition-all min-h-[44px]">
+                      <Plus size={14} className="sm:hidden"/><Plus size={11} className="hidden sm:inline"/>
+                      <span className="hidden sm:inline">Add Order</span>
+                      <span className="sm:hidden">Add</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {enterpriseTab === 'Logistics' && (
@@ -947,20 +1189,31 @@ export default function AethelisOS() {
 
               {enterpriseTab === 'CRM' && (
                 <div className="space-y-3">
-                  {[
-                    { name: 'Arjun Mehra',    role: 'Enterprise Client', status: 'Active',   revenue: '₹4.2L', avatar: 'AM' },
-                    { name: 'Sneha Kapoor',   role: 'Logistics Partner', status: 'Pending',  revenue: '₹1.8L', avatar: 'SK' },
-                    { name: 'Ravi Shankar',   role: 'NFT Collector',     status: 'Inactive', revenue: '₹9.1L', avatar: 'RS' },
-                    { name: 'Priya Nair',     role: 'Media Client',      status: 'Active',   revenue: '₹3.4L', avatar: 'PN' },
-                  ].map(c => (
-                    <div key={c.name} className="card-glass rounded-2xl p-4 flex items-center gap-4 cursor-pointer">
-                      <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center text-violet-400 text-[10px] font-bold shrink-0">{c.avatar}</div>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-white/80">{c.name}</p>
-                        <p className="text-[9px] text-white/35">{c.role}</p>
+                  {elsxLoading ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="skeleton-glass h-16 flex items-center px-4">
+                        <div className="w-9 h-9 rounded-full bg-white/5"></div>
+                        <div className="flex-1 ml-4 space-y-1.5">
+                          <div className="h-2 w-24 bg-white/5 rounded"></div>
+                          <div className="h-1.5 w-16 bg-white/5 rounded"></div>
+                        </div>
                       </div>
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${c.status === 'Active' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : c.status === 'Pending' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-white/25 bg-white/[0.03] border-white/[0.06]'}`}>{c.status}</span>
-                      <span className="text-[10px] font-mono text-emerald-400">{c.revenue}</span>
+                    ))
+                  ) : elsxLeads.map(lead => (
+                    <div key={lead.id} className="card-glass rounded-2xl p-4 flex items-center gap-4 cursor-pointer">
+                      <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center text-violet-400 text-[10px] font-bold shrink-0">
+                        {lead.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs font-medium text-white/80">{lead.name}</p>
+                        <p className="text-[9px] text-white/35">{lead.id} · {lead.contact}</p>
+                      </div>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                        lead.stage === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                        : lead.stage === 'Proposal' || lead.stage === 'Qualified' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                        : 'text-white/25 bg-white/[0.03] border-white/[0.06]'
+                      }`}>{lead.stage}</span>
+                      <span className="text-[10px] font-mono text-emerald-400">{lead.revenue}</span>
                       <ChevronRight size={12} className="text-white/20" />
                     </div>
                   ))}
@@ -1059,11 +1312,61 @@ export default function AethelisOS() {
                 );
               })}
             </div>
+
+            {/* Hijacked Proxy Nodes (WordPress Bridge) */}
+            <div className="mt-6 sm:mt-8">
+              <div className="flex items-center gap-2 mb-3">
+                <Globe size={14} className="text-emerald-400/70" />
+                <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-400/70">Hijacked Proxy Nodes</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {wpLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="skeleton-glass h-28 p-4 flex flex-col gap-2">
+                      <div className="h-2 w-20 bg-white/5 rounded"></div>
+                      <div className="h-1.5 w-32 bg-white/5 rounded"></div>
+                      <div className="flex-1"></div>
+                      <div className="h-6 w-16 bg-white/5 rounded-lg"></div>
+                    </div>
+                  ))
+                ) : wpNodes.map(node => (
+                  <div key={node.id} className="card-glass rounded-2xl p-4 border border-white/[0.07]">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h4 className="font-semibold text-xs text-white/85">{node.name}</h4>
+                        <p className="text-[8px] text-white/30 font-mono mt-0.5">{node.url}</p>
+                      </div>
+                      <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${
+                        node.status === 'online' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                        : node.status === 'degraded' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                        : 'text-red-400 bg-red-500/10 border-red-500/20'
+                      }`}>{node.status.toUpperCase()}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-[9px] text-white/40 mb-3">
+                      <span>{node.orders} orders</span>
+                      <span className="text-emerald-400">{node.revenue}</span>
+                      <span className="text-white/30">{node.health.uptime}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${node.proxyEnabled ? 'bg-emerald-400' : 'bg-white/20'}`}></span>
+                        <span className="text-[8px] text-white/40">{node.proxyEnabled ? 'Proxy Active' : 'Proxy Disabled'}</span>
+                      </div>
+                      <button
+                        onClick={() => handleWpToggle(node.id, !node.proxyEnabled)}
+                        disabled={wpToggling === node.id}
+                        className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${node.proxyEnabled ? 'bg-emerald-500/60' : 'bg-white/10'}`}
+                      >
+                        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${node.proxyEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         );
       }
-
-      // ── Ledger ─────────────────────────────────────────────────────
       case 'ledger': {
         const totalIn  = ledger.filter(t=>t.direction==='in').reduce((a,b)=>a+Number(b.amount),0);
         const totalOut = ledger.filter(t=>t.direction==='out').reduce((a,b)=>a+Number(b.amount),0);
@@ -1083,12 +1386,13 @@ export default function AethelisOS() {
                 </div>
                 <div className="flex items-end gap-2 sm:gap-3">
                   <span className="text-3xl sm:text-5xl font-extralight font-mono text-white">
-                    {(totalIn - totalOut).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {athLive ? athLive.balance.toLocaleString(undefined, { maximumFractionDigits: 2 }) : (sovereignAssets ? Number(sovereignAssets.ath_balance).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (totalIn - totalOut).toLocaleString(undefined, { maximumFractionDigits: 2 }))}
                   </span>
                   <span className="text-base sm:text-xl font-light text-amber-400/80 mb-0.5 sm:mb-2">ATH</span>
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-white/35 mt-1 flex items-center gap-1">
-                  <TrendingUp size={11} className="text-emerald-400" /> +23.4% from last epoch
+                  <TrendingUp size={11} className={athLive && athLive.change24h >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+                  {athLive ? `${athLive.change24h >= 0 ? '+' : ''}${athLive.change24h.toFixed(2)}% from last epoch` : (sovereignAssets ? `${sovereignAssets.nft_count} active NFT assets` : '+23.4% from last epoch')}
                 </p>
               </div>
             </div>
@@ -1181,6 +1485,24 @@ export default function AethelisOS() {
                     <p className="text-[10px] sm:text-[11px]">No transactions</p>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Block Mined Ticker */}
+            <div className="shrink-0 border-t border-white/[0.07] bg-slate-950/80 px-4 sm:px-6 py-2 overflow-hidden">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-[8px] uppercase tracking-widest text-emerald-400/60">Block Mined</span>
+              </div>
+              <div className="flex gap-3 overflow-x-auto no-scrollbar">
+                {blockTicker.map((blk, i) => (
+                  <div key={blk.hash} className={`flex items-center gap-2 shrink-0 ${i === 0 ? 'opacity-100' : 'opacity-50'}`}>
+                    <span className="text-[9px] font-mono text-white/60">#{blk.number.toLocaleString()}</span>
+                    <span className="text-[8px] font-mono text-amber-400/60">{blk.gasFee} gwei</span>
+                    <span className="text-[8px] font-mono text-white/30">{blk.txCount} tx</span>
+                    <span className="text-white/10">|</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -1286,17 +1608,18 @@ export default function AethelisOS() {
 
       // ── Vault ──────────────────────────────────────────────────────
       case 'vault':
-        if (!vaultUnlocked) return (
+        if (!vaultAuthed) return (
           <div className="h-full flex flex-col items-center justify-center bg-slate-950/95 p-4 sm:p-6 relative overflow-hidden">
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] rounded-full bg-violet-600/5 blur-3xl"></div>
               <div className="absolute inset-0" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(139,92,246,0.03) 2px,transparent 4px)', backgroundSize: '100% 4px' }}></div>
             </div>
             <div className="relative mb-6 sm:mb-10">
-              <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full border-2 border-violet-500/30 flex items-center justify-center">
+              <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full border-2 border-violet-500/30 flex items-center justify-center overflow-hidden">
                 <div className="absolute inset-2 rounded-full border border-violet-400/20"></div>
                 <div className="absolute inset-4 rounded-full border border-violet-400/10"></div>
                 <Fingerprint size={42} className="text-violet-500/60 relative z-10 sm:text-[56px]"/>
+                {vaultLoading && <div className="retinal-laser"></div>}
                 <div className="absolute inset-0 rounded-full animate-spin" style={{ borderTop: '2px solid rgba(139,92,246,0.4)', animationDuration: '3s' }}></div>
                 <div className="absolute -inset-4 rounded-full border border-violet-400/5 animate-ping"></div>
               </div>
@@ -1304,13 +1627,14 @@ export default function AethelisOS() {
             </div>
             <h2 className="text-xl sm:text-2xl font-extralight text-white/85 mb-2 tracking-wide">Bio-Pulse Vault</h2>
             <p className="text-[10px] sm:text-[11px] text-white/35 mb-6 sm:mb-10 text-center max-w-[260px] sm:max-w-[280px] leading-relaxed px-4">
-              Biometric synchronization required. Retinal scan initiated.
+              {vaultLoading ? 'Authenticating biometric signature via Supabase zero-trust gateway...' : 'Biometric synchronization required. Retinal scan initiated.'}
             </p>
-            <button onClick={() => setVaultUnlocked(true)}
-              className="relative group min-h-[48px] sm:min-h-0 px-6 sm:px-8">
+            <button onClick={handleVaultAuth}
+              disabled={vaultLoading}
+              className="relative group min-h-[48px] sm:min-h-0 px-6 sm:px-8 disabled:opacity-50">
               <div className="absolute -inset-1 rounded-xl sm:rounded-2xl bg-violet-600/30 blur transition-all group-active:bg-violet-500/40"></div>
               <div className="relative btn-glass bg-violet-600/80 active:bg-violet-500/90 text-white px-6 sm:px-8 py-3 sm:py-3 rounded-xl text-[11px] sm:text-[11px] font-semibold transition-all flex items-center gap-2 border border-violet-400/30 min-h-[48px] sm:min-h-0 justify-center">
-                <Eye size={16} className="sm:text-[14px]"/> <span>Retinal Sync</span>
+                <Eye size={16} className="sm:text-[14px]"/> <span>{vaultLoading ? 'Syncing...' : 'Simulate Retinal Sync'}</span>
               </div>
             </button>
             <p className="text-[8px] sm:text-[9px] text-white/20 mt-4 sm:mt-6 font-mono">PROTOCOL: VP-7749</p>
@@ -1326,40 +1650,30 @@ export default function AethelisOS() {
                 </div>
                 <div>
                   <h2 className="text-base sm:text-lg font-light text-white/85">Archives</h2>
-                  <p className="text-[8px] sm:text-[9px] text-white/35">12 documents</p>
+                  <p className="text-[8px] sm:text-[9px] text-white/35">{vaultFiles.length} documents</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
                 <span className="text-[8px] sm:text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 sm:px-2.5 py-1 rounded flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>OPEN
                 </span>
-                <button onClick={() => setVaultUnlocked(false)} className="text-white/30 active:text-white/60 transition-colors p-2 sm:p-1 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center">
+                <button onClick={() => { setVaultAuthed(false); setVaultFiles([]); }} className="text-white/30 active:text-white/60 transition-colors p-2 sm:p-1 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center">
                   <Lock size={14}/>
                 </button>
               </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 flex-1 overflow-y-auto content-start">
-              {[
-                { name: 'GENESIS-001', type: 'Key', locked: false },
-                { name: 'ALPHA-7B', type: 'Contract', locked: false },
-                { name: 'NEXUS-KEY', type: 'Key', locked: false },
-                { name: 'BIO-SYN', type: 'Genetic', locked: true },
-                { name: 'CORE-X9', type: 'Protocol', locked: false },
-                { name: 'VAULT-0', type: 'Genesis', locked: false },
-                { name: 'REALM-1', type: 'Domain', locked: false },
-                { name: 'DARK-ARC', type: 'Archive', locked: true },
-                { name: 'PULSE-3', type: 'Bio', locked: false },
-                { name: 'NODE-99', type: 'Node', locked: false },
-                { name: 'CRYPT-42', type: 'Cipher', locked: false },
-                { name: 'OMEGA-K', type: 'Master', locked: true },
-              ].map(doc => (
-                <div key={doc.name} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.locked ? 'opacity-60' : ''}`}>
+              {vaultFiles.length === 0 && Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="skeleton-glass h-20 flex items-center justify-center"></div>
+              ))}
+              {vaultFiles.map(doc => (
+                <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.encrypted ? 'opacity-60' : ''}`}>
                   <div className="relative">
                     <FileText size={24} className="text-white/30 group-hover:text-violet-400 transition-colors" />
-                    {doc.locked && <Lock size={10} className="absolute -bottom-1 -right-1 text-amber-400" />}
+                    {doc.encrypted && <Lock size={10} className="absolute -bottom-1 -right-1 text-amber-400" />}
                   </div>
                   <span className="text-[8px] font-mono text-white/40 group-hover:text-violet-400/70 transition-colors text-center">{doc.name}</span>
-                  <span className="text-[7px] uppercase text-white/25">{doc.type}</span>
+                  <span className="text-[7px] uppercase text-white/25">{doc.file_type}</span>
                 </div>
               ))}
             </div>
@@ -1370,8 +1684,18 @@ export default function AethelisOS() {
       case 'kernel': return (
         <div className="h-full bg-[#050505] text-[#d0d0d0] font-mono text-[10px] p-4 flex flex-col">
           <div className="flex-1 overflow-y-auto space-y-0.5 mb-3 pr-1">
+            {dbError && (
+              <div className="void-alert text-red-400 font-bold leading-relaxed py-1">
+                [VOID-PROTOCOL ALERT: DATABASE DISCONNECTED]
+              </div>
+            )}
+            {systemLogs.slice().reverse().map((log) => (
+              <div key={log.id} className={`leading-relaxed ${log.level==='err'?'text-red-400':log.level==='info'?'text-sky-400':log.level==='sys'?'text-emerald-400':'text-white/60'}`}>
+                <span className="text-white/20">[{new Date(log.created_at).toLocaleTimeString()}]</span> {log.message}
+              </div>
+            ))}
             {termHistory.map((log, i) => (
-              <div key={i} className={`leading-relaxed ${log.type==='err'?'text-red-400':log.type==='info'?'text-sky-400':log.type==='sys'?'text-emerald-400':'text-white/60'}`}>
+              <div key={`t-${i}`} className={`leading-relaxed ${log.type==='err'?'text-red-400':log.type==='info'?'text-sky-400':log.type==='sys'?'text-emerald-400':'text-white/60'}`}>
                 {log.text}
               </div>
             ))}
@@ -1677,99 +2001,151 @@ export default function AethelisOS() {
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col select-none"
+      style={{ background: '#040112' }}
       onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
 
-      {/* Wallpaper */}
-      <div className="absolute inset-0 z-0">
-        <img
-          src="https://images.fineartamerica.com/images/artworkimages/mediumlarge/3/beautiful-orange-and-pastel-flowers-seamless-pattern-julien.jpg"
-          alt=""
-          className="w-full h-full object-cover"
-          draggable={false}
-          style={{ animation: 'moveBackground 60s linear infinite', backgroundSize: '500px' }}
-        />
-        <div className="absolute inset-0 bg-black/10"></div>
+      {/* Boot Sequence */}
+      {isBooting && (
+        <div className="boot-screen fixed inset-0 z-[100] flex flex-col items-center justify-center" style={{ background: '#040112' }}>
+          <div className="boot-logo text-center mb-8">
+            <div className="text-4xl sm:text-6xl font-extralight text-white/90 tracking-[0.3em] mb-2">AETHELIS</div>
+            <div className="text-[10px] sm:text-xs text-white/40 font-mono tracking-widest">SOVEREIGN WEB OS</div>
+          </div>
+          <div className="w-48 sm:w-64 h-[2px] bg-white/10 rounded-full overflow-hidden">
+            <div className="boot-progress h-full bg-gradient-to-r from-cyan-400/60 to-violet-500/60"></div>
+          </div>
+          <p className="text-[9px] sm:text-[10px] text-white/30 font-mono mt-4 tracking-wider">AETHELIS KERNEL BOOTING...</p>
+        </div>
+      )}
+
+      {/* Sovereign Wallpaper — Deep Space Nebula + Starfield + Aurora */}
+      <div className="absolute inset-0 z-[-10] overflow-hidden pointer-events-none">
+        {/* Base gradient */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, #050118 0%, #0a0420 35%, #080214 70%, #030010 100%)' }} />
+
+        {/* Aurora band — top */}
+        <div className="absolute -top-1/4 left-0 right-0 h-[60vh] opacity-40"
+          style={{
+            background: 'linear-gradient(120deg, transparent 0%, rgba(0,200,255,0.12) 30%, rgba(120,80,255,0.10) 60%, transparent 100%)',
+            filter: 'blur(80px)',
+            animation: 'float1 25s ease-in-out infinite',
+          }} />
+
+        {/* Aurora band — bottom */}
+        <div className="absolute -bottom-1/4 left-0 right-0 h-[50vh] opacity-30"
+          style={{
+            background: 'linear-gradient(280deg, transparent 0%, rgba(180,60,255,0.10) 35%, rgba(0,220,200,0.08) 65%, transparent 100%)',
+            filter: 'blur(90px)',
+            animation: 'float2 30s ease-in-out infinite',
+          }} />
+
+        {/* Cyan orb — top left */}
+        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(0,240,255,0.15) 0%, rgba(0,240,255,0.05) 40%, transparent 70%)',
+            filter: 'blur(100px)',
+            animation: 'float1 20s ease-in-out infinite',
+          }} />
+
+        {/* Magenta orb — bottom right */}
+        <div className="absolute -bottom-48 -right-48 w-[600px] h-[600px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(181,55,242,0.12) 0%, rgba(181,55,242,0.04) 40%, transparent 70%)',
+            filter: 'blur(120px)',
+            animation: 'float2 25s ease-in-out infinite',
+          }} />
+
+        {/* Secondary cyan orb */}
+        <div className="absolute top-1/2 left-1/3 w-[400px] h-[400px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(0,240,255,0.08) 0%, transparent 60%)',
+            filter: 'blur(80px)',
+            animation: 'float3 30s ease-in-out infinite',
+          }} />
+
+        {/* Starfield layer 1 (small, dense) */}
+        <div className="absolute inset-0 wallpaper-stars-sm" />
+        {/* Starfield layer 2 (medium, sparse) */}
+        <div className="absolute inset-0 wallpaper-stars-md" />
+        {/* Starfield layer 3 (large, twinkling) */}
+        <div className="absolute inset-0 wallpaper-stars-lg" />
+
+        {/* Subtle grid mesh */}
+        <div className="absolute inset-0 opacity-[0.04]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(120,160,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(120,160,255,0.5) 1px, transparent 1px)',
+            backgroundSize: '60px 60px',
+            maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 80%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 80%)',
+          }} />
+
+        {/* Vignette for depth */}
+        <div className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%)' }} />
       </div>
 
-      {/* SVG Filter for Liquid Glass */}
-      <svg style={{ display: 'none' }}>
-        <filter id="glass-distortion" x="0%" y="0%" width="100%" height="100%" filterUnits="objectBoundingBox">
-          <feTurbulence type="fractalNoise" baseFrequency="0.01 0.01" numOctaves="1" seed="5" result="turbulence" />
-          <feComponentTransfer in="turbulence" result="mapped">
-            <feFuncR type="gamma" amplitude="1" exponent="10" offset="0.5" />
-            <feFuncG type="gamma" amplitude="0" exponent="1" offset="0" />
-            <feFuncB type="gamma" amplitude="0" exponent="1" offset="0.5" />
-          </feComponentTransfer>
-          <feGaussianBlur in="turbulence" stdDeviation="3" result="softMap" />
-          <feSpecularLighting in="softMap" surfaceScale="5" specularConstant="1" specularExponent="100" lightingColor="white" result="specLight">
-            <fePointLight x="-200" y="-200" z="300" />
-          </feSpecularLighting>
-          <feComposite in="specLight" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="litImage" />
-          <feDisplacementMap in="SourceGraphic" in2="softMap" scale="150" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </svg>
-
-      {/* Menu Bar — Liquid Glass — Mobile Responsive */}
-      <div className="relative z-[100] h-11 sm:h-10 flex items-center justify-between px-2 sm:px-3 md:px-5 shrink-0 glass-dark liquid-edge">
-        {/* Left Section */}
-        <div className="flex items-center gap-2 sm:gap-3 md:gap-5 text-[11px] md:text-[12px] font-medium text-white/85">
-          {/* Logo */}
-          <div className="flex items-center gap-1.5 sm:gap-2 font-bold cursor-pointer active:opacity-70 transition-opacity min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center">
-            <div className="w-6 h-6 sm:w-5 sm:h-5 rounded-md bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center">
-              <Activity size={12} strokeWidth={2.5} className="text-white"/>
+      {/* Menu Bar - Desktop: Full telemetry | Mobile: Minimal */}
+      {isMobile ? (
+        /* Minimal Mobile Status Bar */
+        <div className="relative z-[100] h-8 flex items-center justify-between px-4 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center">
+              <Activity size={10} strokeWidth={2.5} className="text-white"/>
             </div>
-            <span className="hidden sm:inline tracking-wide">AETHELIS OS</span>
           </div>
-
-          {/* Mobile Menu Button */}
-          <button
-            onClick={() => setMobileMenuOpen(p => !p)}
-            className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center text-white/60 active:text-white active:scale-95 transition-all rounded-lg"
-          >
-            <Menu size={20} />
-          </button>
-
-          {/* Desktop Nav Links */}
-          <div className="hidden md:flex gap-5 text-white/40">
-            {['System','Modules','Network'].map(m => (
-              <span key={m} className="cursor-pointer hover:text-white/80 transition-colors relative group">
-                {m}
+          <div className="flex items-center gap-3 text-white/60">
+            <Wifi size={14} />
+            <Battery size={14} />
+            <span className="text-xs font-medium tabular-nums">{time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+          </div>
+        </div>
+      ) : (
+        /* Desktop Menu Bar with Telemetry */
+        <div className="relative z-[100] h-8 flex items-center justify-between px-4 md:px-6 shrink-0 glass-dark liquid-edge">
+          <div className="flex items-center gap-4 md:gap-6 text-[11px] font-medium text-white/85">
+            <div className="flex items-center gap-2 font-bold cursor-pointer hover:opacity-80 transition-opacity">
+              <div className="w-5 h-5 rounded-md bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center">
+                <Activity size={10} strokeWidth={2.5} className="text-white"/>
+              </div>
+              <span className="tracking-wide text-white/90">AETHELIS OS</span>
+            </div>
+            <div className="hidden md:flex gap-5 text-white/40">
+              <span className="cursor-pointer hover:text-white/80 transition-colors relative group">
+                System
                 <span className="absolute -bottom-1 left-0 w-0 h-px bg-sky-400/60 group-hover:w-full transition-all duration-200"></span>
               </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Right Section */}
-        <div className="flex items-center gap-2 sm:gap-3 md:gap-4 text-white/50 text-[10px] md:text-[11px]">
-          {/* Desktop Status Icons */}
-          <div className="hidden sm:flex items-center gap-2 md:gap-3">
-            <span className="font-mono text-sky-400/80 text-[9px] bg-sky-400/10 px-1.5 py-0.5 rounded">{stats.cpu.toFixed(0)}%</span>
-            <Cpu size={12} className="hover:text-white cursor-pointer transition-colors"/>
-            <Wifi size={12} className="hover:text-white cursor-pointer transition-colors"/>
-            <Battery size={12} className="hover:text-white cursor-pointer transition-colors"/>
-          </div>
-          <span className="font-semibold text-white/85 tabular-nums text-base sm:text-[11px]">{time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
-        </div>
-      </div>
-
-      {/* Mobile Menu Dropdown */}
-      {mobileMenuOpen && (
-        <div className="absolute top-11 left-0 right-0 z-[95] md:hidden glass-dark border-b border-white/10">
-          <div className="px-4 py-2 space-y-1">
-            {['System','Modules','Network','Settings'].map(m => (
-              <div key={m} className="text-white/70 text-sm py-3 px-2 cursor-pointer active:bg-white/10 rounded-lg transition-colors">{m}</div>
-            ))}
-            <div className="border-t border-white/10 pt-3 mt-2">
-              <div className="flex items-center justify-between text-white/50 text-sm py-2">
-                <span>CPU Usage</span>
-                <span className="font-mono text-sky-400">{stats.cpu.toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between text-white/50 text-sm py-2">
-                <span>Memory</span>
-                <span className="font-mono text-violet-400">{stats.ram.toFixed(1)}%</span>
-              </div>
+              <span className="cursor-pointer hover:text-white/80 transition-colors relative group">
+                Modules
+                <span className="absolute -bottom-1 left-0 w-0 h-px bg-sky-400/60 group-hover:w-full transition-all duration-200"></span>
+              </span>
+              <span className="cursor-pointer hover:text-white/80 transition-colors relative group">
+                Network
+                <span className="absolute -bottom-1 left-0 w-0 h-px bg-sky-400/60 group-hover:w-full transition-all duration-200"></span>
+              </span>
             </div>
+          </div>
+          <div className="flex items-center gap-4 text-white/50 text-[10px]">
+            {stats.wsConnected ? (
+              <span className="flex items-center gap-1.5 text-emerald-400 text-[9px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                WS CONNECTED
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-amber-400/60 text-[9px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60"></span>
+                SIM MODE
+              </span>
+            )}
+            <span className="font-mono text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded text-[9px]">
+              CPU {stats.cpu.toFixed(0)}%
+            </span>
+            <span className="font-mono text-violet-400 bg-violet-400/10 px-1.5 py-0.5 rounded text-[9px]">
+              RAM {stats.ram.toFixed(0)}%
+            </span>
+            <Cpu size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
+            <Wifi size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
+            <Battery size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
+            <span className="font-semibold text-white/90 tabular-nums text-xs">{time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
           </div>
         </div>
       )}
@@ -1881,37 +2257,35 @@ export default function AethelisOS() {
         })}
       </div>
 
-      {/* Dock - macOS Magnification Physics */}
+      {/* Dock - CSS Physics handles magnification */}
       {isMobile ? (
-        // Mobile Dock - Fixed bottom scrollable
-        <div className="fixed bottom-0 left-0 right-0 z-[200] p-2 glass-dark border-t border-white/10">
-          <div className="flex gap-2 overflow-x-auto no-scrollbar px-1 py-1" style={{ scrollSnapType: 'x mandatory' }}>
-            {/* Launchpad */}
-            <div className="shrink-0" style={{ scrollSnapAlign: 'center' }}>
-              <button onClick={()=>setLaunchpadOpen(p=>!p)} className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all active:scale-95 ${launchpadOpen ? 'bg-white/25' : 'bg-white/10'}`}>
-                <LayoutGrid size={22} className="text-white/80" />
-              </button>
+        // Mobile Dock - Fixed bottom scrollable carousel
+        <div className="dock-container">
+          {/* Launchpad */}
+          <div className="dock-icon" onClick={()=>setLaunchpadOpen(p=>!p)}>
+            <div className={`dock-icon-inner ${launchpadOpen ? 'bg-white/30' : 'bg-white/15'}`}
+              style={{ borderRadius: '1rem' }}>
+              <LayoutGrid size={22} className={launchpadOpen ? 'text-white' : 'text-white/80'} />
             </div>
-
-            <div className="w-px h-10 bg-white/10 shrink-0 self-center rounded-full"></div>
-
-            {dockApps.map(app => {
-              const isOpen = !!windows.find(w => w.id === app.id && !minimized.includes(w.id));
-              const AI = app.icon;
-              return (
-                <div key={app.id} className="shrink-0" style={{ scrollSnapAlign: 'center' }}>
-                  <button onClick={() => openApp(app)} className="relative w-12 h-12 rounded-xl flex items-center justify-center active:scale-95 transition-all bg-gradient-to-br opacity-90" style={{ background: `linear-gradient(to top right, ${app.gradient.replace('from-', '').split(' ')[0].replace('to-', '')})` }}>
-                    <AI size={20} className="text-white drop-shadow-lg" />
-                    {isOpen && <span className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white"></span>}
-                  </button>
-                </div>
-              );
-            })}
           </div>
+
+          {dockApps.map(app => {
+            const isOpen = !!windows.find(w => w.id === app.id && !minimized.includes(w.id));
+            const AI = app.icon;
+            return (
+              <div key={app.id} className="dock-icon" onClick={() => openApp(app)}>
+                <div className={`dock-icon-inner bg-gradient-to-br ${app.gradient}`}
+                  style={{ borderRadius: '1rem' }}>
+                  <AI size={22} className="text-white drop-shadow-lg" />
+                </div>
+                {isOpen && <span className="dock-indicator"></span>}
+              </div>
+            );
+          })}
         </div>
       ) : (
-        // Desktop Dock
-        <div className="dock-container" style={{ zIndex: 200 }}>
+        // Desktop Dock with CSS :has() physics
+        <div className="dock-container">
           {/* Launchpad */}
           <div className="dock-icon" onClick={()=>setLaunchpadOpen(p=>!p)}>
             <div className={`dock-icon-inner ${launchpadOpen ? 'bg-white/30' : 'bg-white/15'}`}>
@@ -1931,7 +2305,7 @@ export default function AethelisOS() {
                 <div className={`dock-icon-inner bg-gradient-to-br ${app.gradient} ${isMin ? 'opacity-50 saturate-50' : ''}`}>
                   <AI size={20} className="text-white drop-shadow-lg" />
                 </div>
-                {isOpen && <span className="app-indicator"></span>}
+                {isOpen && <span className="dock-indicator"></span>}
                 <span className="dock-text">{app.title}</span>
               </div>
             );
@@ -1939,7 +2313,7 @@ export default function AethelisOS() {
 
           <div className="dock-separator"></div>
 
-          <div className="dock-icon" onClick={() => addSystemEvent('Settings panel accessed', 'system')}>
+          <div className="dock-icon" onClick={() => { openApp(APPS.SETTINGS); addSystemEvent('Settings panel accessed', 'system'); }}>
             <div className="dock-icon-inner bg-white/15">
               <Settings size={20} className="text-white/80" />
             </div>
