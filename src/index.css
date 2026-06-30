@@ -1,0 +1,495 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ───────────────────────────────────────────────────── */
+
+* { font-family: 'Inter', sans-serif; }
+.font-mono, code, pre { font-family: 'JetBrains Mono', monospace; }
+
+/* ── Custom scrollbars ────────────────────────────────────────── */
+
+::-webkit-scrollbar            { width: 6px; height: 6px; }
+::-webkit-scrollbar-track      { background: rgba(0,0,0,0.1); }
+::-webkit-scrollbar-thumb      { background: rgba(100,116,139,0.3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover{ background: rgba(100,116,139,0.5); }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Animation keyframes ──────────────────────────────────────── */
+
+@keyframes scan {
+  0%, 100% { top: 0; }
+  50% { top: calc(100% - 2px); }
+}
+
+.animate-scan {
+  animation: scan 2s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* ── Dark mode color utilities ─────────────────────────────────── */
+
+.dark {
+  color-scheme: dark;
+}
+
+/* ── Glow effects ─────────────────────────────────────────────── */
+
+.glow-cyan { text-shadow: 0 0 10px rgba(0,240,255,0.8); }
+.glow-emerald { text-shadow: 0 0 10px rgba(16,185,129,0.8); }
+.glow-red { text-shadow: 0 0 10px rgba(239,68,68,0.8); }
+.glow-violet { text-shadow: 0 0 10px rgba(139,92,246,0.8); }
+.glow-amber { text-shadow: 0 0 10px rgba(245,158,11,0.8); }
+
+/* ── Liquid Glass Effect 3.0 ──────────────────────────────────────── */
+
+:root {
+  --trans: 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.glass-substrate {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(30px) saturate(1.2);
+  -webkit-backdrop-filter: blur(30px) saturate(1.2);
+}
+
+.glass-dark {
+  background: rgba(10, 17, 32, 0.5);
+  backdrop-filter: blur(30px) saturate(1.2);
+  -webkit-backdrop-filter: blur(30px) saturate(1.2);
+}
+
+.liquid-edge {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+.depth-shadow {
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+}
+
+/* ── macOS Dock Magnification (Exact Advanced CSS Physics) ─────────────────────── */
+
+.dock-container {
+  --w: 3.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2), 0 0 1em 1em rgba(0, 0, 0, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 1.5rem;
+  height: var(--w);
+  overflow-x: visible;
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-end;
+  transition: width var(--trans);
+  z-index: 100;
+  padding: 0 1rem;
+}
+
+.dock-container:hover {
+  width: calc(10 * var(--w));
+}
+
+.dock-container.mobile-dock {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  overflow-x: auto;
+  width: auto;
+  max-width: 95vw;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dock-container.mobile-dock::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-icon {
+  position: relative;
+  min-width: var(--w);
+  height: 100%;
+  transform-origin: bottom;
+  transition: var(--trans);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* Exact Mathematical Magnification Physics */
+.dock-icon:hover {
+  scale: 2.7;
+  margin-inline: 1.5rem;
+  z-index: 50;
+}
+
+.dock-icon:hover + .dock-icon,
+.dock-icon:has(+ .dock-icon:hover) {
+  scale: 2.2;
+  margin-inline: 0.8rem;
+  z-index: 40;
+}
+
+.dock-icon:hover + .dock-icon + .dock-icon,
+.dock-icon:has(+ .dock-icon + .dock-icon:hover) {
+  scale: 1.8;
+  margin-inline: 0.5rem;
+  z-index: 30;
+}
+
+.dock-icon:hover + .dock-icon + .dock-icon + .dock-icon,
+.dock-icon:has(+ .dock-icon + .dock-icon + .dock-icon:hover) {
+  scale: 1.3;
+  margin-inline: 0.2rem;
+  z-index: 20;
+}
+
+.dock-icon-inner {
+  width: 80%;
+  aspect-ratio: 1 / 1;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.15s linear;
+  margin-bottom: 0.2rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+}
+
+.dock-icon:active .dock-icon-inner {
+  transform: translateY(0.1rem);
+}
+
+/* Tooltip Text */
+.dock-text {
+  --bg: rgba(20, 20, 30, 0.85);
+  position: absolute;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background-color: var(--bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0.25rem 0.6rem;
+  text-align: center;
+  top: -1.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 0.4rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dock-text::after {
+  --size: 4px;
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border: var(--size) solid transparent;
+  border-top-color: var(--bg);
+  border-bottom: 0;
+  margin-left: calc(-1 * var(--size));
+  margin-bottom: calc(-1 * var(--size));
+}
+
+.dock-icon:hover .dock-text {
+  opacity: 1;
+}
+
+.app-indicator {
+  position: absolute;
+  bottom: -0.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9), 0 0 12px rgba(255, 255, 255, 0.5);
+}
+
+.dock-separator {
+  width: 1px;
+  height: 1.5rem;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 0.5rem;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* Mobile dock override */
+.dock-container.mobile-dock .dock-icon:hover {
+  scale: 1.15;
+  margin-inline: 0.1rem;
+}
+
+.dock-container.mobile-dock .dock-icon:hover + .dock-icon,
+.dock-container.mobile-dock .dock-icon:has(+ .dock-icon:hover) {
+  scale: 1.05;
+  margin-inline: 0;
+}
+
+/* ── Window Liquid Glass Styling ─────────────────────────────────────── */
+
+.window-glass {
+  background: rgba(13, 13, 18, 0.88);
+  backdrop-filter: blur(40px) saturate(1.15);
+  -webkit-backdrop-filter: blur(40px) saturate(1.15);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.85),
+    0 0 1em 1em rgba(0, 0, 0, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.25);
+}
+
+.window-glass-inactive {
+  background: rgba(13, 13, 18, 0.78);
+  backdrop-filter: blur(30px) saturate(1.05);
+  -webkit-backdrop-filter: blur(30px) saturate(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.5),
+    0 0 0.5em 0.5em rgba(0, 0, 0, 0.15),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+.titlebar-glass {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Mount Animations ───────────────────────────────────────────── */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* ── Card Glass Interior ───────────────────────────────────────────── */
+
+.card-glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.card-glass:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.08), 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Button Glass ───────────────────────────────────────────── */
+
+.btn-glass {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.btn-glass:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.15), 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Input Glass ───────────────────────────────────────────── */
+
+.input-glass {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: all 0.25s ease;
+}
+
+.input-glass:focus {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 2px rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+/* ── Table Glass ───────────────────────────────────────────── */
+
+.table-glass {
+  background: rgba(0, 0, 0, 0.15);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-glass th {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.table-glass td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.table-glass tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+@keyframes moveBackground {
+  from { background-position: 0% 0%; }
+  to { background-position: 0% -1500%; }
+}
+
+/* ── Mobile Touch Optimizations ──────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  /* Increase touch targets */
+  .btn-glass, button {
+    min-height: 44px;
+  }
+
+  /* Prevent text selection on interactive elements */
+  button, .dock-icon, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* Ensure windows take full screen on mobile */
+  .window-glass, .window-glass-inactive {
+    border-radius: 0 !important;
+  }
+
+  /* Fix overflow scrolling */
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Larger titlebar on mobile */
+  .titlebar-glass {
+    min-height: 48px;
+  }
+
+  /* Mobile dock is now handled inline in React */
+}
+
+/* ── Pulse animation for active processes ─────────────────────────────── */
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(56, 189, 248, 0);
+  }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
+
+/* ── Status indicator dots ─────────────────────────────────────── */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.online {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.status-dot.warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.status-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+/* ── Smooth transitions for all interactive elements ───────────────────── */
+
+button, a, [role="button"], .card-glass, .btn-glass {
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ── Hide scrollbars globally for native feel ───────────────────── */
+
+.overflow-y-auto::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb,
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover,
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
