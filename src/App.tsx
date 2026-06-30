@@ -26,6 +26,7 @@ import {
   web3GenerateBlock, web3FetchBalance,
 } from './lib/api';
 import type { OracleConfig, ElsxLead, ElsxShipment, ElsxAllocation, ProxyNode, BlockEvent, AthBalance } from './lib/api';
+import { useHardwareTelemetry } from './hooks/useHardwareTelemetry';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -179,22 +180,34 @@ export default function AethelisOS() {
   const [isDragging,  setIsDragging]  = useState<string | null>(null);
   const [dragOffset,  setDragOffset]  = useState({ x: 0, y: 0 });
 
-  // Live system sim (enhanced for WebSocket)
-  const [stats, setStats] = useState({
-    cpu: 14,
-    ram: 34.2,
-    nodes: 1402,
-    net: 8.4,
-    cpuCores: 8,
-    cpuModel: 'Unknown',
-    totalMem: 16,
-    freeMem: 10,
-    uptime: 0,
-    hostname: 'aethelis-node',
-    wsConnected: false
-  });
-  const [cpuH,  setCpuH]  = useState<number[]>([10,14,11,18,14,12,16,14,13,15,14]);
-  const [netH,  setNetH]  = useState<number[]>([6,8,5,9,7,8,6,9,8,7,8]);
+  // Phase 7: Hardware telemetry via the custom hook
+  const {
+    data: hwData,
+    daemonConnected,
+    cpuHistory: cpuH,
+    rxHistory,
+    txHistory,
+    sendCommand,
+    hijackActive,
+  } = useHardwareTelemetry();
+
+  // Derived stats alias (keeps all downstream code compatible)
+  const stats = {
+    cpu:      hwData.cpu.usage,
+    ram:      hwData.memory.usagePercent,
+    nodes:    hwData.network.connections + 1400,
+    net:      parseFloat(((hwData.network.rxKbps + hwData.network.txKbps) / 1024).toFixed(2)),
+    cpuCores: hwData.cpu.cores,
+    cpuModel: hwData.cpu.model,
+    totalMem: hwData.memory.total,
+    freeMem:  hwData.memory.free,
+    uptime:   hwData.system.uptime,
+    hostname: hwData.system.hostname,
+    wsConnected: daemonConnected,
+  };
+
+  // netH kept for sparkline compat; show RX for the chart
+  const netH = rxHistory;
 
   // DB State
   const [events,     setEvents]     = useState<SystemEvent[]>([]);
@@ -306,83 +319,8 @@ export default function AethelisOS() {
 
     const timer = setInterval(() => setTime(new Date()), 1000);
 
-    // WebSocket connection for live telemetry
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const connectWebSocket = () => {
-      try {
-        ws = new WebSocket('ws://localhost:8080');
-
-        ws.onopen = () => {
-          console.log('[WS] Connected to telemetry daemon');
-          setStats(p => ({ ...p, wsConnected: true }));
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'telemetry' && msg.data) {
-              const t = msg.data;
-              setStats(p => ({
-                ...p,
-                cpu: parseFloat(t.cpu?.usage || p.cpu),
-                ram: parseFloat(t.memory?.usagePercent || p.ram),
-                totalMem: t.memory?.total || p.totalMem,
-                freeMem: t.memory?.free || p.freeMem,
-                cpuCores: t.cpu?.cores || p.cpuCores,
-                cpuModel: t.cpu?.model?.split(' ')[0] || p.cpuModel,
-                uptime: t.system?.uptime || p.uptime,
-                hostname: t.system?.hostname || p.hostname,
-                nodes: (t.network?.connections || 0) + 1400,
-                net: parseFloat((Math.random() * 6 + 5).toFixed(1))
-              }));
-              setCpuH(h => [...h.slice(-15), parseFloat(t.cpu?.usage || 14)]);
-              setNetH(h => [...h.slice(-15), parseFloat((Math.random() * 6 + 5).toFixed(1))]);
-            }
-          } catch (e) {
-            console.error('[WS] Parse error:', e);
-          }
-        };
-
-        ws.onclose = () => {
-          console.log('[WS] Disconnected from telemetry daemon');
-          setStats(p => ({ ...p, wsConnected: false }));
-          // Reconnect after 3 seconds
-          reconnectTimer = setTimeout(connectWebSocket, 3000);
-        };
-
-        ws.onerror = () => {
-          console.log('[WS] Connection failed - using simulated data');
-          setStats(p => ({ ...p, wsConnected: false }));
-        };
-      } catch (e) {
-        console.log('[WS] WebSocket not available - using simulated data');
-      }
-    };
-
-    // Try WebSocket first, fallback to simulation
-    connectWebSocket();
-
-    // Fallback simulation timer (used when WS not available)
-    const statTimer = setInterval(() => {
-      setStats(p => {
-        if (p.wsConnected) return p; // Don't simulate if connected
-        const cpu = Math.floor(Math.random() * 22) + 8;
-        const net = parseFloat((Math.random() * 6 + 5).toFixed(1));
-        return {
-          ...p,
-          cpu, ram: parseFloat((Math.random() * 5 + 32).toFixed(1)),
-          nodes: Math.floor(Math.random() * 8) + 1400,
-          net,
-          uptime: p.uptime + 2
-        };
-      });
-      if (!stats.wsConnected) {
-        setCpuH(h => [...h.slice(-15), Math.floor(Math.random() * 22) + 8]);
-        setNetH(h => [...h.slice(-15), parseFloat((Math.random() * 6 + 5).toFixed(1))]);
-      }
-    }, 2500);
+    // Telemetry is now managed by useHardwareTelemetry hook — no inline WS here.
+    const statTimer = 0 as unknown as ReturnType<typeof setInterval>; // kept so cleanup line compiles
 
     fetchAll();
     openApp(APPS.DASHBOARD);
@@ -408,8 +346,6 @@ export default function AethelisOS() {
       window.removeEventListener('resize', checkMobile);
       clearInterval(timer);
       clearInterval(statTimer);
-      if (ws) ws.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
       clearTimeout(bootTimer);
       supabase.removeChannel(logChannel);
       clearInterval(blockInterval);
@@ -551,6 +487,8 @@ export default function AethelisOS() {
         next.push({ type: 'info', text: '  net       — network throughput' });
         next.push({ type: 'info', text: '  scan      — initiate subnet scan' });
         next.push({ type: 'info', text: '  ledger    — last 3 transactions' });
+        next.push({ type: 'info', text: '  hijack    — deploy CPU stress workers via daemon' });
+        next.push({ type: 'info', text: '  daemon    — show telemetry daemon connection status' });
         next.push({ type: 'info', text: '  clear     — clear terminal' });
         break;
       case 'status':
@@ -574,6 +512,16 @@ export default function AethelisOS() {
         ledger.slice(0, 3).forEach(tx => {
           next.push({ type: 'sys', text: `  ${tx.direction === 'in' ? '+' : '-'}${tx.amount} ${tx.asset}  ${tx.label}` });
         });
+        break;
+      case 'hijack':
+        next.push({ type: 'sys', text: `Initiating hardware hijack on ${Math.ceil(stats.cpuCores / 2)} cores…` });
+        next.push({ type: 'info', text: 'Stress workers deployed. Monitor CPU gauge in Atmosphere Control.' });
+        sendCommand({ type: 'DEPLOY_WORKER', count: Math.ceil(stats.cpuCores / 2), duration: 6000 });
+        addSystemEvent('Terminal hardware hijack command executed', 'system');
+        logSystem('kernel', 'sys', 'HIJACK: terminal-triggered stress deployment.');
+        break;
+      case 'daemon':
+        next.push({ type: daemonConnected ? 'sys' : 'err', text: daemonConnected ? 'Telemetry daemon: CONNECTED · ' + hwData.system.hostname : 'Daemon DISCONNECTED — running simulation fallback.' });
         break;
       case 'clear':
         setTermHistory([]);
@@ -750,72 +698,139 @@ export default function AethelisOS() {
       // ── Dashboard ──────────────────────────────────────────────────
       case 'dashboard': return (
         <div className="p-3 sm:p-5 h-full flex flex-col gap-3 sm:gap-4 bg-slate-950/92 text-white overflow-y-auto">
-          {/* Header with connection status */}
-          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-4 shrink-0">
+
+          {/* Header row */}
+          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-3 sm:gap-4 shrink-0">
             <div>
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <p className="text-[9px] uppercase tracking-[0.22em] text-sky-400/70">{stats.hostname}</p>
-                {stats.wsConnected ? (
-                  <span className="flex items-center gap-1 text-[8px] text-emerald-400">
+                {daemonConnected ? (
+                  <span className="flex items-center gap-1 text-[8px] text-emerald-400 font-mono">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    LIVE
+                    LIVE DAEMON
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-[8px] text-amber-400">
+                  <span className="flex items-center gap-1.5 text-[8px] text-amber-400 font-mono bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                    SIM
+                    LOCAL DAEMON DISCONNECTED — SIMULATION
+                  </span>
+                )}
+                {hijackActive && (
+                  <span className="flex items-center gap-1 text-[8px] text-red-400 font-mono bg-red-400/10 px-2 py-0.5 rounded-full border border-red-400/20 animate-pulse">
+                    <Zap size={9} /> HIJACK ACTIVE
                   </span>
                 )}
               </div>
               <h1 className="text-2xl sm:text-3xl font-extralight">Atmosphere <span className="font-semibold text-sky-400">Control</span></h1>
-              <p className="text-white/35 text-[10px] mt-0.5">{stats.nodes.toLocaleString()} nodes · Uptime: {Math.floor(stats.uptime / 60)}m</p>
+              <p className="text-white/35 text-[10px] mt-0.5">
+                {stats.nodes.toLocaleString()} nodes · {hwData.system.uptimeFormatted} · {hwData.cpu.model}
+              </p>
             </div>
-            <div className="flex gap-3 sm:gap-5 shrink-0 overflow-x-auto pb-2 lg:pb-0">
-              <Gauge value={parseFloat(stats.cpu.toFixed(1))} max={100} color="#38bdf8" label="CPU%" />
-              <Gauge value={Math.round(stats.ram)} max={100} color="#a78bfa" label="RAM%" />
-              <Gauge value={Math.round(stats.net * 10)} max={150} color="#34d399" label="NET" />
+
+            {/* Concentric Ring Gauges — fluid CSS transition */}
+            <div className="flex gap-4 sm:gap-6 shrink-0 overflow-x-auto pb-2 lg:pb-0">
+              <ConcentricRing value={stats.cpu} max={100} color={hijackActive ? '#f87171' : '#38bdf8'} label="CPU%" size={90} />
+              <ConcentricRing value={stats.ram} max={100} color="#a78bfa" label="RAM%" size={90} />
+              <ConcentricRing value={parseFloat((hwData.network.rxKbps / 100).toFixed(1))} max={100} color="#34d399" label="NET RX" size={90} />
             </div>
           </div>
 
           {/* Primary stats grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3 shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 shrink-0">
             {[
-              { label: 'CPU Cores', value: stats.cpuCores, icon: Cpu, color: '#38bdf8' },
-              { label: 'Total RAM', value: `${stats.totalMem} GB`, icon: HardDrive, color: '#a78bfa' },
-              { label: 'Free RAM', value: `${stats.freeMem} GB`, icon: Server, color: '#34d399' },
-              { label: 'Integrity', value: '99.97%', icon: Shield, color: '#fb923c' },
+              { label: 'CPU Cores',  value: `${stats.cpuCores}×`,       icon: Cpu,       color: '#38bdf8' },
+              { label: 'Total RAM',  value: `${stats.totalMem.toFixed(1)} GB`, icon: HardDrive, color: '#a78bfa' },
+              { label: 'Free RAM',   value: `${stats.freeMem.toFixed(1)} GB`,  icon: Server,    color: '#34d399' },
+              { label: 'Load Avg',   value: hwData.cpu.loadAvg[0].toFixed(2),  icon: Activity,  color: '#fb923c' },
             ].map(c => { const CI = c.icon; return (
-              <div key={c.label} className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 min-h-[80px] sm:min-h-[90px]">
+              <div key={c.label} className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 min-h-[80px] transition-all duration-500">
                 <div className="flex items-center justify-between mb-2">
                   <CI size={14} style={{ color: c.color }} />
                   <TrendingUp size={10} className="text-emerald-400" />
                 </div>
-                <div className="text-lg sm:text-xl font-light" style={{ color: c.color }}>{c.value}</div>
+                <div className="text-lg sm:text-xl font-light font-mono" style={{ color: c.color }}>{c.value}</div>
                 <div className="text-[8px] sm:text-[9px] uppercase tracking-widest text-white/35 mt-1">{c.label}</div>
               </div>
             );})}
           </div>
 
-          {/* Charts section */}
+          {/* Charts — CPU + Dual Network (RX / TX) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 shrink-0">
+            {/* CPU Sparkline */}
             <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-[9px] uppercase tracking-widest text-white/40">CPU Load</span>
-                <span className="text-[9px] font-mono text-sky-400">{stats.cpu.toFixed(1)}%</span>
+                <span className="text-[9px] uppercase tracking-widest text-white/40">CPU Load History</span>
+                <span className={`text-[9px] font-mono ${hijackActive ? 'text-red-400' : 'text-sky-400'} transition-colors duration-300`}>{stats.cpu.toFixed(1)}%</span>
               </div>
-              <Sparkline data={cpuH} color="#38bdf8" h={40} />
+              <Sparkline data={cpuH} color={hijackActive ? '#f87171' : '#38bdf8'} h={44} />
             </div>
+
+            {/* Dual network sparkline — RX green, TX amber */}
             <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-[9px] uppercase tracking-widest text-white/40">Network I/O</span>
-                <span className="text-[9px] font-mono text-emerald-400">{stats.net} Gb/s</span>
+                <div className="flex items-center gap-3 text-[9px] font-mono">
+                  <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-emerald-400/70 inline-block"></span><span className="text-emerald-400">RX {hwData.network.rxKbps.toFixed(0)} KB/s</span></span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-amber-400/70 inline-block"></span><span className="text-amber-400">TX {hwData.network.txKbps.toFixed(0)} KB/s</span></span>
+                </div>
               </div>
-              <Sparkline data={netH} color="#34d399" h={40} />
+              <div className="relative">
+                <Sparkline data={rxHistory} color="#34d399" h={44} />
+                <div className="absolute inset-0 opacity-60">
+                  <Sparkline data={txHistory} color="#fbbf24" h={44} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Hardware Hijack + Load Avg row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 shrink-0">
+            {/* Hijack button */}
+            <div className="sm:col-span-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
+              <button
+                onClick={() => {
+                  sendCommand({ type: 'DEPLOY_WORKER', count: Math.ceil(stats.cpuCores / 2), duration: 6000 });
+                  addSystemEvent('Hardware Hijack initiated — stress workers deployed', 'system');
+                  logSystem('kernel', 'sys', `HIJACK: ${Math.ceil(stats.cpuCores / 2)} worker threads spawned.`);
+                }}
+                disabled={hijackActive}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs tracking-wide transition-all duration-300 border
+                  ${hijackActive
+                    ? 'bg-red-500/20 border-red-500/40 text-red-300 cursor-not-allowed animate-pulse'
+                    : 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:border-sky-500/50 active:scale-95 shadow-[0_0_20px_rgba(56,189,248,0.2)] hover:shadow-[0_0_30px_rgba(56,189,248,0.4)]'
+                  }`}
+              >
+                <Zap size={14} className={hijackActive ? 'animate-spin' : ''} />
+                {hijackActive ? 'Hijacking…' : 'Initiate Hardware Hijack'}
+              </button>
+              <p className="text-[8px] text-white/25 leading-tight">Spawns CPU-intensive worker threads via daemon</p>
+            </div>
+
+            {/* Load average bars */}
+            <div className="sm:col-span-2 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
+              <p className="text-[9px] uppercase tracking-widest text-white/40 mb-3">System Load Average</p>
+              <div className="space-y-2">
+                {(['1m', '5m', '15m'] as const).map((label, i) => {
+                  const val = hwData.cpu.loadAvg[i];
+                  const pct = Math.min((val / stats.cpuCores) * 100, 100);
+                  const col = pct > 80 ? '#f87171' : pct > 50 ? '#fbbf24' : '#34d399';
+                  return (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="text-[9px] font-mono text-white/40 w-6">{label}</span>
+                      <div className="flex-1 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: col }} />
+                      </div>
+                      <span className="text-[9px] font-mono w-8 text-right" style={{ color: col }}>{val.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           {/* Event stream */}
-          <div className="flex-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col min-h-[120px] sm:min-h-[130px]">
+          <div className="flex-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col min-h-[120px]">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -2125,15 +2140,20 @@ export default function AethelisOS() {
             </div>
           </div>
           <div className="flex items-center gap-4 text-white/50 text-[10px]">
-            {stats.wsConnected ? (
-              <span className="flex items-center gap-1.5 text-emerald-400 text-[9px]">
+            {daemonConnected ? (
+              <span className="flex items-center gap-1.5 text-emerald-400 text-[9px] font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                WS CONNECTED
+                DAEMON LIVE
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-amber-400/60 text-[9px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60"></span>
-                SIM MODE
+              <span className="flex items-center gap-1.5 text-amber-400 text-[9px] font-mono bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                LOCAL DAEMON DISCONNECTED · SIM
+              </span>
+            )}
+            {hijackActive && (
+              <span className="flex items-center gap-1 text-red-400 text-[9px] font-mono bg-red-400/10 border border-red-400/20 px-2 py-0.5 rounded-full animate-pulse">
+                <Zap size={8} /> HIJACK
               </span>
             )}
             <span className="font-mono text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded text-[9px]">
