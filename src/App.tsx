@@ -12,7 +12,8 @@ import {
   Bell, Pause, PlayCircle, StopCircle, Power, LogOut,
   Sun, Moon, Volume2, VolumeX, Monitor, Palette,
   Clock, Calendar, Mail, MessageSquare, AlertTriangle,
-  BookOpen, Sparkles, Send, Compass, Target, Crosshair
+  BookOpen, Sparkles, Send, Compass, Target, Crosshair,
+  Brain, Timer, Network as NetworkIcon
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import type {
@@ -165,6 +166,16 @@ function ConcentricRing({ value, max, color, label, size = 80 }: {
 
 // ─── Main OS Component ────────────────────────────────────────────────────────
 
+function formatPersistenceUptime(s: number): string {
+  if (!s || s < 0) return '—';
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 export default function AethelisOS() {
   // OS State
   const [windows,          setWindows]          = useState<WindowState[]>([]);
@@ -180,7 +191,7 @@ export default function AethelisOS() {
   const [isDragging,  setIsDragging]  = useState<string | null>(null);
   const [dragOffset,  setDragOffset]  = useState({ x: 0, y: 0 });
 
-  // Phase 7: Hardware telemetry via the custom hook
+  // Phase 8/9: Hardware telemetry + shell bridge + harvester + ELSX compute node
   const {
     data: hwData,
     daemonConnected,
@@ -189,7 +200,31 @@ export default function AethelisOS() {
     txHistory,
     sendCommand,
     hijackActive,
+    harvestActive,
+    harvestedCycles,
+    shellOutputs,
+    persistence,
+    // Phase 9
+    computeNodeActive,
+    computeNodeStats,
+    vaultFiles: fsVaultFiles,
+    vaultError: fsVaultError,
+    networkDevices,
+    networkScanRaw,
+    networkScanning,
+    networkScanError,
+    // Phase 10
+    mlActive,
+    mlStats,
+    stressTestActive,
+    stressTestStats,
+    schedulerJobs,
+    schedulerEvent,
   } = useHardwareTelemetry();
+
+  // Phase 8: Shell history tracking — local commands echoed + WS results
+  const [shellBusy, setShellBusy] = useState(false);
+  const [harvestIntensity, setHarvestIntensity] = useState(2);
 
   // Derived stats alias (keeps all downstream code compatible)
   const stats = {
@@ -226,7 +261,7 @@ export default function AethelisOS() {
   const [vaultAuthed,  setVaultAuthed]  = useState(false);
 
   // App-specific
-  const [enterpriseTab,  setEnterpriseTab]  = useState<'Logistics'|'CRM'|'Wealth'|'System'>('Logistics');
+  const [enterpriseTab,  setEnterpriseTab]  = useState<'Logistics'|'CRM'|'Wealth'|'System'|'Scheduler'>('Logistics');
   const [scanProgress,   setScanProgress]   = useState(false);
   const [emulatorEnv,    setEmulatorEnv]    = useState('iOS');
   const [emulatorBooted, setEmulatorBooted] = useState(false);
@@ -356,7 +391,11 @@ export default function AethelisOS() {
   // Phase 6: integration fetches moved below function declarations to avoid TDZ
 
   useEffect(() => { termEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [termHistory]);
+  useEffect(() => { termEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [shellOutputs]);
   useEffect(() => { oracleEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [oracleMessages]);
+
+  // Clear shell busy state when a new output arrives from the daemon
+  useEffect(() => { if (shellOutputs.length > 0) setShellBusy(false); }, [shellOutputs]);
 
   // ─── Emulator boot simulation ────────────────────────────────────
 
@@ -487,8 +526,11 @@ export default function AethelisOS() {
         next.push({ type: 'info', text: '  net       — network throughput' });
         next.push({ type: 'info', text: '  scan      — initiate subnet scan' });
         next.push({ type: 'info', text: '  ledger    — last 3 transactions' });
-        next.push({ type: 'info', text: '  hijack    — deploy CPU stress workers via daemon' });
+        next.push({ type: 'info', text: '  hijack    — short CPU spike (stress workers)' });
+        next.push({ type: 'info', text: '  harvest   — toggle continuous compute harvester' });
         next.push({ type: 'info', text: '  daemon    — show telemetry daemon connection status' });
+        next.push({ type: 'info', text: '  persist   — check PM2 / boot persistence status' });
+        next.push({ type: 'info', text: '  <any cmd> — forwarded to host shell via daemon' });
         next.push({ type: 'info', text: '  clear     — clear terminal' });
         break;
       case 'status':
@@ -504,9 +546,10 @@ export default function AethelisOS() {
         next.push({ type: 'sys', text: `Throughput: ${stats.net} Gb/s | Latency: 2ms | Packet loss: 0.00%` });
         break;
       case 'scan':
-        next.push({ type: 'info', text: 'Initiating subnet scan... routing through Nexus bridge.' });
-        next.push({ type: 'sys', text: '12 nodes detected. 10 secured. 2 flagged.' });
-        logSystem('kernel', 'info', 'Subnet scan executed: 12 nodes detected, 2 flagged.');
+        next.push({ type: 'info', text: 'Initiating local mesh discovery scan (arp -a)…' });
+        setScanProgress(true);
+        sendCommand({ type: 'NETWORK_SCAN' });
+        logSystem('kernel', 'info', 'Local mesh discovery scan initiated — running arp -a on host subnet.');
         break;
       case 'ledger':
         ledger.slice(0, 3).forEach(tx => {
@@ -521,14 +564,55 @@ export default function AethelisOS() {
         logSystem('kernel', 'sys', 'HIJACK: terminal-triggered stress deployment.');
         break;
       case 'daemon':
-        next.push({ type: daemonConnected ? 'sys' : 'err', text: daemonConnected ? 'Telemetry daemon: CONNECTED · ' + hwData.system.hostname : 'Daemon DISCONNECTED — running simulation fallback.' });
+        next.push({ type: daemonConnected ? 'sys' : 'err', text: daemonConnected ? 'Telemetry daemon: CONNECTED · ' + hwData.system.hostname : '[AWAITING DAEMON CONNECTION] — running simulation fallback.' });
+        break;
+      case 'harvest':
+        if (harvestActive) {
+          next.push({ type: 'sys', text: 'Stopping compute harvester…' });
+          sendCommand({ type: 'STOP_HARVEST' });
+        } else {
+          next.push({ type: 'sys', text: `Engaging compute harvester (intensity ${harvestIntensity})…` });
+          sendCommand({ type: 'START_HARVEST', intensity: harvestIntensity });
+        }
+        break;
+      case 'elsx':
+        if (computeNodeActive) {
+          next.push({ type: 'err', text: 'ELSX compute node already engaged.' });
+        } else {
+          next.push({ type: 'sys', text: `Engaging ELSX compute node — ${hwData.cpu.cores} cores, allocating vector cache…` });
+          sendCommand({ type: 'START_COMPUTE_NODE' });
+        }
+        break;
+      case 'suspend':
+        if (computeNodeActive) {
+          next.push({ type: 'sys', text: 'Suspending ELSX compute node — terminating workers, freeing vector cache…' });
+          sendCommand({ type: 'SUSPEND_COMPUTE_NODE' });
+        } else {
+          next.push({ type: 'err', text: 'ELSX compute node is not active.' });
+        }
+        break;
+      case 'vault':
+        next.push({ type: 'info', text: 'Requesting vault file listing from daemon…' });
+        sendCommand({ type: 'VAULT_LIST_FILES' });
+        break;
+      case 'persist':
+        sendCommand({ type: 'REQUEST_PERSISTENCE' });
+        next.push({ type: 'info', text: 'Querying daemon persistence status…' });
         break;
       case 'clear':
         setTermHistory([]);
         setTermInput('');
         return;
-      default:
-        next.push({ type: 'err', text: `bash: ${cmd}: command not found. Type "help" for commands.` });
+      default: {
+        // Unknown local command — forward to real shell if daemon is connected
+        if (daemonConnected) {
+          setShellBusy(true);
+          sendCommand({ type: 'TERMINAL_COMMAND', command: termInput.trim() });
+          next.push({ type: 'info', text: `[exec] ${termInput.trim()} — awaiting daemon response…` });
+        } else {
+          next.push({ type: 'err', text: `${cmd}: command not found (local). Connect daemon for reverse shell.` });
+        }
+      }
     }
     setTermHistory(next);
     setTermInput('');
@@ -548,9 +632,12 @@ export default function AethelisOS() {
       const { error } = await supabase.auth.signInAnonymously();
       if (error) throw error;
       await new Promise(r => setTimeout(r, 2200));
+      // Phase 9: Fetch from both Supabase (legacy) and backend fs (real local files)
       const { data, error: fErr } = await supabase.from('vault_files').select('*').order('created_at', { ascending: true });
       if (fErr) throw fErr;
       setVaultFiles(data as VaultFile[]);
+      // Request real local files from the backend daemon
+      sendCommand({ type: 'VAULT_LIST_FILES' });
       setVaultAuthed(true);
       logSystem('vault', 'sys', 'Bio-Pulse Vault unlocked. Zero-trust handshake complete.');
     } catch {
@@ -558,7 +645,38 @@ export default function AethelisOS() {
     } finally {
       setVaultLoading(false);
     }
-  }, [logSystem]);
+  }, [logSystem, sendCommand]);
+
+  // Phase 9: Sync backend fs vault files into the UI state
+  useEffect(() => {
+    if (fsVaultFiles && fsVaultFiles.length >= 0) {
+      // Merge: if backend has files, show those; otherwise keep Supabase data
+      if (fsVaultFiles.length > 0) {
+        const mapped: VaultFile[] = fsVaultFiles.map(f => ({
+          id: f.name,
+          name: f.name,
+          file_type: f.fileType,
+          encrypted: true,
+          created_at: f.created_at,
+        }));
+        setVaultFiles(mapped);
+      }
+    }
+  }, [fsVaultFiles]);
+
+  // Phase 9: Show vault errors from the backend
+  useEffect(() => {
+    if (fsVaultError) {
+      logSystem('vault', 'warn', fsVaultError);
+    }
+  }, [fsVaultError, logSystem]);
+
+  // Phase 9: Sync network scan progress state
+  useEffect(() => {
+    if (networkDevices.length > 0 || networkScanError) {
+      setScanProgress(false);
+    }
+  }, [networkDevices, networkScanError]);
 
   // ─── Phase 6 Integration Fetchers ────────────────────────────────
 
@@ -711,8 +829,8 @@ export default function AethelisOS() {
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 text-[8px] text-amber-400 font-mono bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                    LOCAL DAEMON DISCONNECTED — SIMULATION
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    [AWAITING DAEMON CONNECTION]
                   </span>
                 )}
                 {hijackActive && (
@@ -783,10 +901,10 @@ export default function AethelisOS() {
             </div>
           </div>
 
-          {/* Hardware Hijack + Load Avg row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 shrink-0">
+          {/* Hardware Hijack + Compute Harvest row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0">
             {/* Hijack button */}
-            <div className="sm:col-span-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
               <button
                 onClick={() => {
                   sendCommand({ type: 'DEPLOY_WORKER', count: Math.ceil(stats.cpuCores / 2), duration: 6000 });
@@ -803,11 +921,204 @@ export default function AethelisOS() {
                 <Zap size={14} className={hijackActive ? 'animate-spin' : ''} />
                 {hijackActive ? 'Hijacking…' : 'Initiate Hardware Hijack'}
               </button>
-              <p className="text-[8px] text-white/25 leading-tight">Spawns CPU-intensive worker threads via daemon</p>
+              <p className="text-[8px] text-white/25 leading-tight">Short CPU spike — spawns {Math.ceil(stats.cpuCores / 2)} stress threads for 6 s</p>
+            </div>
+
+            {/* Compute Harvester button */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
+              <button
+                onClick={() => {
+                  if (harvestActive) {
+                    sendCommand({ type: 'STOP_HARVEST' });
+                    addSystemEvent('Compute harvester disengaged', 'system');
+                    logSystem('kernel', 'info', 'HARVEST: compute harvester stopped.');
+                  } else {
+                    sendCommand({ type: 'START_HARVEST', intensity: harvestIntensity });
+                    addSystemEvent('Compute harvester engaged — harvesting host CPU cycles', 'system');
+                    logSystem('kernel', 'sys', `HARVEST: ${harvestIntensity} threads engaged — harvesting CPU cycles.`);
+                  }
+                }}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs tracking-wide transition-all duration-300 border
+                  ${harvestActive
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300 shadow-[0_0_25px_rgba(52,211,153,0.3)]'
+                    : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:border-emerald-500/50 active:scale-95 shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)]'
+                  }`}
+              >
+                <Zap size={14} className={harvestActive ? 'animate-pulse' : ''} />
+                {harvestActive ? 'Stop Harvester' : 'Engage Compute Harvester'}
+              </button>
+              <div className="flex items-center gap-2 text-[8px] text-white/25">
+                <span>Intensity</span>
+                <input
+                  type="range" min={1} max={Math.max(stats.cpuCores, 4)} value={harvestIntensity}
+                  onChange={e => setHarvestIntensity(parseInt(e.target.value))}
+                  disabled={harvestActive}
+                  className="w-20 h-1 accent-emerald-400 cursor-pointer disabled:opacity-30"
+                />
+                <span className="font-mono text-emerald-400/70">{harvestIntensity}×</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Phase 9: ELSX Distributed Compute Node row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0">
+            {/* ELSX Compute Node engage/suspend */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
+              <button
+                onClick={() => {
+                  if (computeNodeActive) {
+                    sendCommand({ type: 'SUSPEND_COMPUTE_NODE' });
+                    addSystemEvent('ELSX Compute Node suspended — returning to idle', 'system');
+                    logSystem('kernel', 'info', 'ELSX: Compute node suspended — all workers terminated, vector cache freed.');
+                  } else {
+                    sendCommand({ type: 'START_COMPUTE_NODE' });
+                    addSystemEvent('ELSX Compute Node engaged — full-core grid processing initiated', 'system');
+                    logSystem('kernel', 'sys', `ELSX: Compute node engaged — ${hwData.cpu.cores} cores spawning worker threads, allocating vector cache.`);
+                  }
+                }}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs tracking-wide transition-all duration-300 border
+                  ${computeNodeActive
+                    ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300 shadow-[0_0_25px_rgba(34,211,238,0.3)]'
+                    : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/30 hover:border-cyan-500/50 active:scale-95 shadow-[0_0_20px_rgba(34,211,238,0.2)] hover:shadow-[0_0_30px_rgba(34,211,238,0.4)]'
+                  }`}
+              >
+                <Cpu size={14} className={computeNodeActive ? 'animate-pulse' : ''} />
+                {computeNodeActive ? 'Suspend Compute Node' : 'Engage ELSX Compute Node'}
+              </button>
+              <p className="text-[8px] text-white/25 leading-tight">
+                {computeNodeActive
+                  ? `Running on ${computeNodeStats?.cores ?? hwData.cpu.cores} cores — ${computeNodeStats?.vectorCacheMB ?? 0} MB vector cache`
+                  : `Spawns ${hwData.cpu.cores} worker threads + allocates RAM vector cache + mesh sync stream`}
+              </p>
+            </div>
+
+            {/* ELSX stats display */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-center gap-1.5">
+              {computeNodeActive && computeNodeStats ? (
+                <>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] uppercase tracking-widest text-cyan-400/60">ELSX Grid Stats</span>
+                    <span className="flex items-center gap-1 text-[8px] text-cyan-400 font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>PROCESSING
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[9px] font-mono">
+                    <div>
+                      <div className="text-white/30">Compute Cycles</div>
+                      <div className="text-cyan-400 text-[11px]">{(computeNodeStats.cycles / 1000).toFixed(1)}K</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Vector Ops</div>
+                      <div className="text-cyan-400 text-[11px]">{(computeNodeStats.vectorOps / 1000).toFixed(1)}K</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Mesh Packets</div>
+                      <div className="text-cyan-400 text-[11px]">{computeNodeStats.meshPackets}</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Vector Cache</div>
+                      <div className="text-cyan-400 text-[11px]">{computeNodeStats.vectorCacheMB} MB</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full gap-1.5">
+                  <Cpu size={20} className="text-white/15" />
+                  <p className="text-[9px] text-white/25 text-center">ELSX node idle — engage to begin grid processing</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Phase 10: On-Device ML Fine-Tuning row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0">
+            {/* ML Fine-Tuning engage/suspend */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-center gap-2 text-center">
+              <button
+                onClick={() => {
+                  if (mlActive) {
+                    sendCommand({ type: 'STOP_ML_FINE_TUNING' });
+                    addSystemEvent('ML fine-tuning suspended — weight buffers released', 'system');
+                    logSystem('kernel', 'info', 'ML: Fine-tuning suspended — all workers terminated, weight buffers freed.');
+                  } else {
+                    sendCommand({ type: 'START_ML_FINE_TUNING' });
+                    addSystemEvent('On-device ML fine-tuning initiated — tensor operations engaged', 'system');
+                    logSystem('kernel', 'sys', `ML: Fine-tuning engaged — ${hwData.cpu.cores} cores spawning tensor workers, allocating weight buffers to saturate RAM.`);
+                  }
+                }}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs tracking-wide transition-all duration-300 border
+                  ${mlActive
+                    ? 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300 shadow-[0_0_25px_rgba(217,70,239,0.3)]'
+                    : 'bg-fuchsia-500/15 border-fuchsia-500/30 text-fuchsia-300 hover:bg-fuchsia-500/30 hover:border-fuchsia-500/50 active:scale-95 shadow-[0_0_20px_rgba(217,70,239,0.2)] hover:shadow-[0_0_30px_rgba(217,70,239,0.4)]'
+                  }`}
+              >
+                <Brain size={14} className={mlActive ? 'animate-pulse' : ''} />
+                {mlActive ? 'Suspend ML Fine-Tuning' : 'Initiate Local ML Fine-Tuning'}
+              </button>
+              <p className="text-[8px] text-white/25 leading-tight">
+                {mlActive
+                  ? `Training on ${mlStats?.cores ?? hwData.cpu.cores} cores — ${mlStats?.weightBufferMB ?? 0} MB weight buffers — RAM at ${mlStats?.memUsagePercent ?? 0}%`
+                  : `Spawns tensor workers for neural backprop + saturates RAM to 85-95% with training weights`}
+              </p>
+            </div>
+
+            {/* ML stats display */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-center gap-1.5">
+              {mlActive && mlStats ? (
+                <>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] uppercase tracking-widest text-fuchsia-400/60">ML Training Stats</span>
+                    <span className="flex items-center gap-1 text-[8px] text-fuchsia-400 font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 animate-pulse"></span>TRAINING
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[9px] font-mono">
+                    <div>
+                      <div className="text-white/30">Epochs</div>
+                      <div className="text-fuchsia-400 text-[11px]">{mlStats.epochs.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Tensor Ops</div>
+                      <div className="text-fuchsia-400 text-[11px]">{(mlStats.tensorOps / 1e6).toFixed(1)}M</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Loss</div>
+                      <div className="text-fuchsia-400 text-[11px]">{mlStats.loss.toFixed(4)}</div>
+                    </div>
+                    <div>
+                      <div className="text-white/30">Accuracy</div>
+                      <div className="text-fuchsia-400 text-[11px]">{(mlStats.accuracy * 100).toFixed(1)}%</div>
+                    </div>
+                  </div>
+                  <div className="mt-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-fuchsia-500 to-pink-500 transition-all duration-500" style={{ width: `${Math.min(100, mlStats.accuracy * 100)}%` }} />
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full gap-1.5">
+                  <Brain size={20} className="text-white/15" />
+                  <p className="text-[9px] text-white/25 text-center">ML engine idle — initiate to begin on-device fine-tuning</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Harvester stats + Load Average + Persistence row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 shrink-0">
+            {/* Harvested cycles counter */}
+            <div className="card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[9px] uppercase tracking-widest text-white/40">Compute Contribution</span>
+                {harvestActive && <span className="flex items-center gap-1 text-[8px] text-emerald-400 font-mono"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>HARVESTING</span>}
+              </div>
+              <div className={`text-xl sm:text-2xl font-light font-mono transition-colors duration-300 ${harvestActive ? 'text-emerald-400' : 'text-white/40'}`}>
+                {harvestedCycles.toLocaleString()}
+              </div>
+              <div className="text-[8px] text-white/25 mt-1">harvested cycles</div>
             </div>
 
             {/* Load average bars */}
-            <div className="sm:col-span-2 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
+            <div className="sm:col-span-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
               <p className="text-[9px] uppercase tracking-widest text-white/40 mb-3">System Load Average</p>
               <div className="space-y-2">
                 {(['1m', '5m', '15m'] as const).map((label, i) => {
@@ -818,13 +1129,38 @@ export default function AethelisOS() {
                     <div key={label} className="flex items-center gap-3">
                       <span className="text-[9px] font-mono text-white/40 w-6">{label}</span>
                       <div className="flex-1 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, backgroundColor: col }} />
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: col }} />
                       </div>
                       <span className="text-[9px] font-mono w-8 text-right" style={{ color: col }}>{val.toFixed(2)}</span>
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Node Persistence status */}
+            <div className="sm:col-span-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4">
+              <p className="text-[9px] uppercase tracking-widest text-white/40 mb-2">Node Persistence</p>
+              {persistence?.pm2 || persistence?.autostart ? (
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-[9px] text-emerald-400 font-mono bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    PERMANENT NODE: SECURED
+                  </span>
+                </div>
+              ) : daemonConnected ? (
+                <div className="flex flex-col gap-1">
+                  <span className="flex items-center gap-1.5 text-[9px] text-amber-400 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    EPHEMERAL — NO AUTOSTART
+                  </span>
+                  <span className="text-[8px] text-white/25">Run `node setup_node.js` to persist</span>
+                </div>
+              ) : (
+                <span className="text-[9px] text-white/30 font-mono">Daemon offline</span>
+              )}
+              <div className="text-[8px] text-white/25 mt-2 font-mono">
+                PID {persistence?.pid ?? '—'} · {(persistence?.uptime ?? 0) > 0 ? formatPersistenceUptime(persistence?.uptime ?? 0) : '—'}
               </div>
             </div>
           </div>
@@ -1111,8 +1447,8 @@ export default function AethelisOS() {
 
       // ── Enterprise ─────────────────────────────────────────────────
       case 'enterprise': {
-        const tabs: Array<'Logistics'|'CRM'|'Wealth'|'System'> = ['Logistics','CRM','Wealth','System'];
-        const tabIcons = { Logistics: Globe, CRM: Users, Wealth: BarChart3, System: Database };
+        const tabs: Array<'Logistics'|'CRM'|'Wealth'|'System'|'Scheduler'> = ['Logistics','CRM','Wealth','System','Scheduler'];
+        const tabIcons = { Logistics: Globe, CRM: Users, Wealth: BarChart3, System: Database, Scheduler: Timer };
         return (
           <div className="h-full flex flex-col bg-slate-950/92 text-white">
             {/* Mobile: Horizontal scrollable tabs */}
@@ -1385,7 +1721,7 @@ export default function AethelisOS() {
       case 'ledger': {
         const totalIn  = ledger.filter(t=>t.direction==='in').reduce((a,b)=>a+Number(b.amount),0);
         const totalOut = ledger.filter(t=>t.direction==='out').reduce((a,b)=>a+Number(b.amount),0);
-        const chartData = ledger.slice(0, 12).reverse().map((_, i) => Math.floor(Math.random() * 500) + 100);
+        const chartData = ledger.slice(0, 12).reverse().map(t => Math.abs(Number(t.amount)));
         return (
           <div className="h-full flex flex-col bg-slate-950/95 text-white overflow-hidden">
             {/* Hero Stats - Mobile responsive */}
@@ -1583,9 +1919,27 @@ export default function AethelisOS() {
               <ShieldAlert size={13}/> KALI-NEXUS
             </h2>
             <div className="flex items-center gap-3">
-              <button onClick={() => { setScanProgress(true); setTimeout(()=>setScanProgress(false),3000); addSystemEvent('Kali-Nexus: Manual subnet scan initiated.','security'); }}
+              <button onClick={() => {
+                  setScanProgress(true);
+                  sendCommand({ type: 'NETWORK_SCAN' });
+                  addSystemEvent('Kali-Nexus: Local mesh discovery scan initiated.', 'security');
+                  logSystem('nexus', 'info', 'Local mesh discovery scan initiated — running arp -a on host subnet.');
+                }}
                 className="flex items-center gap-1.5 border border-red-800/40 px-2.5 py-1 rounded-lg text-[9px] hover:bg-red-900/20 transition-colors">
-                <RefreshCw size={9} className={scanProgress ? 'animate-spin' : ''}/> {scanProgress ? 'Scanning…' : 'Rescan'}
+                <RefreshCw size={9} className={scanProgress || networkScanning ? 'animate-spin' : ''}/> {scanProgress || networkScanning ? 'Scanning…' : 'Scan Network'}
+              </button>
+              <button onClick={() => {
+                  if (stressTestActive) {
+                    sendCommand({ type: 'STOP_STRESS_TEST' });
+                    addSystemEvent('Subnet stress test terminated.', 'security');
+                  } else {
+                    sendCommand({ type: 'START_STRESS_TEST', durationSec: 30, concurrency: 500 });
+                    addSystemEvent('Subnet stress test initiated — high-concurrency TCP/UDP traffic generation on loopback.', 'security');
+                    logSystem('nexus', 'info', 'Stress test: 500 concurrent TCP clients + UDP flood on 127.0.0.1 for 30s.');
+                  }
+                }}
+                className={`flex items-center gap-1.5 border px-2.5 py-1 rounded-lg text-[9px] transition-colors ${stressTestActive ? 'border-red-500/60 bg-red-500/20 text-red-300 animate-pulse' : 'border-amber-800/40 hover:bg-amber-900/20'}`}>
+                <NetworkIcon size={9} className={stressTestActive ? 'animate-pulse' : ''}/> {stressTestActive ? 'Stress Active…' : 'Subnet Stress Test'}
               </button>
               <span className="flex items-center gap-1.5 bg-red-500/8 border border-red-900/30 px-2 py-0.5 rounded text-[9px] font-bold">
                 <span className="w-1 h-1 bg-red-500 rounded-full animate-pulse"></span>VOID-PROTOCOL
@@ -1594,29 +1948,70 @@ export default function AethelisOS() {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-1 mb-4 pr-1">
-            {[
-              { c: 'text-white/30', t: '> Initializing planetary subnet scan…' },
-              { c: 'text-emerald-400', t: '> Bridge routing established — 12 subnets enumerated.' },
-              { c: 'text-amber-400/80', t: '> WARNING: 4 nodes flagged for active vulnerability exposure.' },
-              { c: 'text-red-400', t: '> CVE-2024-0001 confirmed on 192.168.1.44 — remote code execution.' },
-              { c: 'text-emerald-400', t: '> Auth token extraction: SUCCESS.' },
-              { c: 'text-white/30', t: `> Scan complete at ${time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` },
-            ].map((l,i) => <p key={i} className={l.c}>{l.t}</p>)}
+            {stressTestActive && stressTestStats && (
+              <div className="mb-2 border border-amber-900/30 bg-amber-950/10 rounded-lg p-2">
+                <p className="text-amber-400 font-bold text-[9px] mb-1">SUBNET STRESS TEST IN PROGRESS</p>
+                <p className="text-white/40 text-[9px]">Packets TX: {stressTestStats.packetsSent.toLocaleString()} | RX: {stressTestStats.packetsReceived.toLocaleString()}</p>
+                <p className="text-white/40 text-[9px]">Throughput: {stressTestStats.throughputMBps} MB/s | Errors: {stressTestStats.errors} | Elapsed: {stressTestStats.elapsed}s</p>
+              </div>
+            )}
+            {!stressTestActive && stressTestStats && stressTestStats.packetsSent > 0 && (
+              <div className="mb-2 border border-emerald-900/30 bg-emerald-950/10 rounded-lg p-2">
+                <p className="text-emerald-400 font-bold text-[9px] mb-1">STRESS TEST COMPLETE</p>
+                <p className="text-white/40 text-[9px]">Total packets: {stressTestStats.packetsSent.toLocaleString()} sent, {stressTestStats.packetsReceived.toLocaleString()} received</p>
+                <p className="text-white/40 text-[9px]">Duration: {stressTestStats.elapsed}s | Errors: {stressTestStats.errors}</p>
+              </div>
+            )}
+            {networkScanError ? (
+              <p className="text-red-400">&gt; ERROR: {networkScanError}</p>
+            ) : networkDevices.length > 0 ? (
+              <>
+                <p className="text-white/30">&gt; Local mesh discovery complete — {networkDevices.length} active device(s) found.</p>
+                <p className="text-emerald-400">&gt; Bridge routing established — {networkDevices.length} nodes enumerated on local subnet.</p>
+                {networkDevices.map((d, i) => (
+                  <p key={i} className="text-white/50">
+                    &gt; {d.ip.padEnd(16)} {d.mac.padEnd(20)} [{d.type}] on {d.interface}
+                  </p>
+                ))}
+                <p className="text-white/30">&gt; Scan complete at {time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</p>
+              </>
+            ) : networkScanRaw ? (
+              <p className="text-white/30">&gt; Scan completed — no devices found.</p>
+            ) : (
+              <>
+                <p className="text-white/30">&gt; Initializing planetary subnet scan…</p>
+                <p className="text-emerald-400">&gt; Bridge routing established — 12 subnets enumerated.</p>
+                <p className="text-amber-400/80">&gt; WARNING: 4 nodes flagged for active vulnerability exposure.</p>
+                <p className="text-red-400">&gt; CVE-2024-0001 confirmed on 192.168.1.44 — remote code execution.</p>
+                <p className="text-emerald-400">&gt; Auth token extraction: SUCCESS.</p>
+                <p className="text-white/30">&gt; Scan complete at {time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</p>
+              </>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 shrink-0">
-            {[
-              { ip: '192.168.1.44',  os: 'Windows 11',    vuln: 'CVE-2024-0001',   s: 'EXPOSED',  sc: 'text-red-400    border-red-900/30    bg-red-950/15' },
-              { ip: '192.168.1.102', os: 'iOS 17.4',      vuln: null,              s: 'SECURE',   sc: 'text-emerald-400 border-emerald-900/30 bg-emerald-950/10' },
-              { ip: '192.168.1.78',  os: 'Android 14',    vuln: 'ADB open',        s: 'AT RISK',  sc: 'text-amber-400  border-amber-900/30  bg-amber-950/10' },
-              { ip: '10.0.0.1',      os: 'RouterOS 7.1',  vuln: 'Default creds',   s: 'EXPOSED',  sc: 'text-red-400    border-red-900/30    bg-red-950/15' },
-            ].map(n => (
-              <div key={n.ip} className={`border rounded-xl p-3 cursor-pointer hover:brightness-125 transition-all ${n.sc}`}>
-                <div className="flex justify-between mb-1"><span className="text-white/55">{n.ip}</span><span className="font-bold text-[9px]">{n.s}</span></div>
-                <div className="text-white/25 text-[9px]">{n.os}</div>
-                {n.vuln && <div className="text-[8px] mt-1 opacity-60">{n.vuln}</div>}
-              </div>
-            ))}
+            {networkDevices.length > 0 ? (
+              networkDevices.map((d, i) => (
+                <div key={i} className="border rounded-xl p-3 cursor-pointer hover:brightness-125 transition-all text-emerald-400 border-emerald-900/30 bg-emerald-950/10">
+                  <div className="flex justify-between mb-1"><span className="text-white/55">{d.ip}</span><span className="font-bold text-[9px]">ACTIVE</span></div>
+                  <div className="text-white/25 text-[9px]">{d.mac}</div>
+                  <div className="text-[8px] mt-1 opacity-60">{d.type} on {d.interface}</div>
+                </div>
+              ))
+            ) : (
+              [
+                { ip: '192.168.1.44',  os: 'Windows 11',    vuln: 'CVE-2024-0001',   s: 'EXPOSED',  sc: 'text-red-400    border-red-900/30    bg-red-950/15' },
+                { ip: '192.168.1.102', os: 'iOS 17.4',      vuln: null,              s: 'SECURE',   sc: 'text-emerald-400 border-emerald-900/30 bg-emerald-950/10' },
+                { ip: '192.168.1.78',  os: 'Android 14',    vuln: 'ADB open',        s: 'AT RISK',  sc: 'text-amber-400  border-amber-900/30  bg-amber-950/10' },
+                { ip: '10.0.0.1',      os: 'RouterOS 7.1',  vuln: 'Default creds',   s: 'EXPOSED',  sc: 'text-red-400    border-red-900/30    bg-red-950/15' },
+              ].map(n => (
+                <div key={n.ip} className={`border rounded-xl p-3 cursor-pointer hover:brightness-125 transition-all ${n.sc}`}>
+                  <div className="flex justify-between mb-1"><span className="text-white/55">{n.ip}</span><span className="font-bold text-[9px]">{n.s}</span></div>
+                  <div className="text-white/25 text-[9px]">{n.os}</div>
+                  {n.vuln && <div className="text-[8px] mt-1 opacity-60">{n.vuln}</div>}
+                </div>
+              ))
+            )}
           </div>
         </div>
       );
@@ -1678,9 +2073,17 @@ export default function AethelisOS() {
               </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 flex-1 overflow-y-auto content-start">
-              {vaultFiles.length === 0 && Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="skeleton-glass h-20 flex items-center justify-center"></div>
-              ))}
+              {vaultFiles.length === 0 && (
+                <div className="col-span-full flex flex-col items-center justify-center py-12 gap-3">
+                  <Fingerprint size={32} className="text-violet-500/30" />
+                  <p className="text-[10px] sm:text-[11px] text-white/30 font-mono tracking-wider">NO ASSETS SECURED</p>
+                  <p className="text-[8px] sm:text-[9px] text-white/20 text-center max-w-[240px]">
+                    {daemonConnected
+                      ? 'Storage directory is empty. Upload files to secure them locally.'
+                      : 'Connect to the Aethelis daemon to access local secure storage.'}
+                  </p>
+                </div>
+              )}
               {vaultFiles.map(doc => (
                 <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.encrypted ? 'opacity-60' : ''}`}>
                   <div className="relative">
@@ -1710,10 +2113,30 @@ export default function AethelisOS() {
               </div>
             ))}
             {termHistory.map((log, i) => (
-              <div key={`t-${i}`} className={`leading-relaxed ${log.type==='err'?'text-red-400':log.type==='info'?'text-sky-400':log.type==='sys'?'text-emerald-400':'text-white/60'}`}>
+              <div key={`t-${i}`} className={`leading-relaxed whitespace-pre-wrap break-all ${log.type==='err'?'text-red-400':log.type==='info'?'text-sky-400':log.type==='sys'?'text-emerald-400':'text-white/60'}`}>
                 {log.text}
               </div>
             ))}
+            {/* Live shell outputs from the daemon reverse shell */}
+            {shellOutputs.map((sh, i) => (
+              <div key={`sh-${i}`} className="leading-relaxed">
+                {sh.output && (
+                  <pre className="text-white/70 whitespace-pre-wrap break-all font-mono text-[10px] mt-0.5">{sh.output}</pre>
+                )}
+                {sh.error && (
+                  <div className="flex items-start gap-1.5 text-red-400 mt-0.5">
+                    <AlertTriangle size={10} className="mt-0.5 shrink-0" />
+                    <pre className="whitespace-pre-wrap break-all font-mono text-[10px]">{sh.error}</pre>
+                  </div>
+                )}
+              </div>
+            ))}
+            {shellBusy && (
+              <div className="flex items-center gap-2 text-sky-400/60 py-1">
+                <RefreshCw size={10} className="animate-spin" />
+                <span className="text-[10px] font-mono">awaiting daemon response…</span>
+              </div>
+            )}
             <div ref={termEndRef}/>
           </div>
           <div className="flex items-center gap-1.5 pt-3 border-t border-white/[0.05] shrink-0">
@@ -2147,13 +2570,23 @@ export default function AethelisOS() {
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-amber-400 text-[9px] font-mono bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                LOCAL DAEMON DISCONNECTED · SIM
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                [AWAITING DAEMON]
               </span>
             )}
             {hijackActive && (
               <span className="flex items-center gap-1 text-red-400 text-[9px] font-mono bg-red-400/10 border border-red-400/20 px-2 py-0.5 rounded-full animate-pulse">
                 <Zap size={8} /> HIJACK
+              </span>
+            )}
+            {harvestActive && (
+              <span className="flex items-center gap-1 text-emerald-400 text-[9px] font-mono bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
+                <Zap size={8} className="animate-pulse" /> HARVESTING
+              </span>
+            )}
+            {computeNodeActive && (
+              <span className="flex items-center gap-1 text-cyan-400 text-[9px] font-mono bg-cyan-400/10 border border-cyan-400/20 px-2 py-0.5 rounded-full">
+                <Cpu size={8} className="animate-pulse" /> ELSX GRID
               </span>
             )}
             <span className="font-mono text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded text-[9px]">
