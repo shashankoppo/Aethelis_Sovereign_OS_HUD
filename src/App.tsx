@@ -1620,6 +1620,53 @@ export default function AethelisOS() {
                   ))}
                 </div>
               )}
+
+              {/* Phase 10: Autonomous Task Matrix */}
+              {enterpriseTab === 'Scheduler' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-400/70">Agentic Workflow Engine</p>
+                      <p className="text-white/30 text-[10px]">Autonomous background jobs that invoke compute workers on schedule.</p>
+                    </div>
+                    <button onClick={() => sendCommand({ type: 'SCHEDULER_GET_STATUS' })}
+                      className="flex items-center gap-1.5 border border-white/10 px-2.5 py-1 rounded-lg text-[9px] hover:bg-white/5 transition-colors">
+                      <RefreshCw size={9}/> Refresh
+                    </button>
+                  </div>
+                  {schedulerJobs.length === 0 ? (
+                    <div className="text-center py-8 text-white/20 text-[10px]">No scheduler jobs loaded. Click Refresh to fetch from daemon.</div>
+                  ) : schedulerJobs.map(job => (
+                    <div key={job.id} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 flex items-center gap-4">
+                      <div className={`w-1.5 h-1.5 rounded-full ${job.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`}></div>
+                      <div className="flex-1">
+                        <div className="font-mono text-[10px] text-white/70">{job.name}</div>
+                        <div className="text-[8px] text-white/30 mt-0.5">
+                          Every {job.intervalSec}s · {job.runCount} runs{job.lastRun ? ` · Last: ${new Date(job.lastRun).toLocaleTimeString()}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (job.enabled) {
+                            sendCommand({ type: 'SCHEDULER_DISABLE_JOB', jobId: job.id });
+                          } else {
+                            sendCommand({ type: 'SCHEDULER_ENABLE_JOB', jobId: job.id });
+                          }
+                        }}
+                        className={`text-[8px] font-bold px-3 py-1.5 rounded-lg transition-colors ${job.enabled
+                          ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
+                        {job.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                    </div>
+                  ))}
+                  {schedulerEvent && (
+                    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-2 text-[9px] text-emerald-400/70 font-mono">
+                      {schedulerEvent.type === 'triggered' ? '>' : '✓'} {schedulerEvent.jobName} {schedulerEvent.type === 'triggered' ? 'triggered — invoking compute workers…' : 'completed.'}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );
