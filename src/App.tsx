@@ -28,6 +28,7 @@ import {
 } from './lib/api';
 import type { OracleConfig, ElsxLead, ElsxShipment, ElsxAllocation, ProxyNode, BlockEvent, AthBalance } from './lib/api';
 import { useHardwareTelemetry } from './hooks/useHardwareTelemetry';
+import { unlockVault, lockVault, listNotes, saveNote, deleteNote, type SecureNote } from './lib/secureVault';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -259,6 +260,17 @@ export default function AethelisOS() {
   const [vaultFiles,   setVaultFiles]   = useState<VaultFile[]>([]);
   const [vaultLoading, setVaultLoading] = useState(false);
   const [vaultAuthed,  setVaultAuthed]  = useState(false);
+  const [secureNotes,  setSecureNotes]  = useState<SecureNote[]>([]);
+  const [vaultPassphrase, setVaultPassphrase] = useState('');
+  const [vaultNoteTitle, setVaultNoteTitle] = useState('');
+  const [vaultNoteContent, setVaultNoteContent] = useState('');
+  const [vaultShowNewNote, setVaultShowNewNote] = useState(false);
+  const [vaultSaving, setVaultSaving] = useState(false);
+
+  // Phase 11: Agentic Command Flow — auto-scrolling log generator
+  const [agenticLogs, setAgenticLogs] = useState<string[]>([]);
+  const agenticLogRef = useRef<HTMLDivElement>(null);
+  const agenticLogEndRef = useRef<HTMLDivElement>(null);
 
   // App-specific
   const [enterpriseTab,  setEnterpriseTab]  = useState<'Logistics'|'CRM'|'Wealth'|'System'|'Scheduler'>('Logistics');
@@ -410,6 +422,99 @@ export default function AethelisOS() {
   const windowsRef = useRef<WindowState[]>([]);
   useEffect(() => { windowsRef.current = windows; }, [windows]);
 
+  // Phase 11: Window Memory — persist positions/sizes/open state to localStorage
+  const WINDOW_STORAGE_KEY = 'aethelis_window_state';
+  useEffect(() => {
+    try {
+      const state = windows.map(w => ({
+        id: w.id, x: w.x, y: w.y, width: w.width, height: w.height,
+        isMaximized: w.isMaximized, zIndex: w.zIndex,
+      }));
+      localStorage.setItem(WINDOW_STORAGE_KEY, JSON.stringify({
+        windows: state,
+        minimized,
+        activeWindowId,
+      }));
+    } catch {}
+  }, [windows, minimized, activeWindowId]);
+
+  // Restore window state on initial mount
+  const [windowsRestored, setWindowsRestored] = useState(false);
+  useEffect(() => {
+    if (windowsRestored) return;
+    try {
+      const saved = localStorage.getItem(WINDOW_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          windows: Array<{ id: string; x: number; y: number; width: number; height: number; isMaximized: boolean; zIndex: number }>;
+          minimized: string[];
+          activeWindowId: string | null;
+        };
+        if (parsed.windows?.length > 0) {
+          const restored = parsed.windows.map(w => {
+            const config = APPS.find(a => a.id === w.id);
+            if (!config) return null;
+            return { ...config, ...w };
+          }).filter(Boolean) as WindowState[];
+          if (restored.length > 0) {
+            setWindows(restored);
+            setMinimized(parsed.minimized ?? []);
+            if (parsed.activeWindowId) setActiveWindowId(parsed.activeWindowId);
+          }
+        }
+      }
+    } catch {}
+    setWindowsRestored(true);
+  }, [windowsRestored]);
+
+  // Phase 11: Agentic Command Flow — dynamic log generation + auto-scroll
+  useEffect(() => {
+    const AGENTIC_MESSAGES = [
+      'ELSX Route Optimization complete — 14 trade lanes recalculated',
+      'Node synchronization stable across all compute shards',
+      'Scraped external pricing delta — 3.2% deviation from oracle',
+      'Autonomous ledger reconciliation: 847 entries verified',
+      'Mesh heartbeat acknowledged — 6 peers responsive',
+      'Tensor weight checkpoint saved to local cache',
+      'Supply chain anomaly detected — rerouting shipment #4821',
+      'Oracle consensus reached — block 18,392 validated',
+      'Memory defragmentation cycle complete — 2.1 GB reclaimed',
+      'Network reconnaissance sweep finished — 23 devices mapped',
+      'Cryptographic handshake established with node ELSX-7',
+      'Background data aggregation pipeline flushed to vault',
+      'Threat assessment matrix updated — risk level: nominal',
+      'Compute worker pool scaled — 4 threads engaged for batch processing',
+      'Ledger synchronization daemon idle — awaiting next cycle',
+      'Vault integrity check passed — all 12 encrypted assets verified',
+      'Bandwidth saturation test concluded — 487 Mbps peak throughput',
+      'Smart contract execution confirmed — gas optimized at 21,000 units',
+      'Distributed cache invalidated — refreshing hot path entries',
+      'Telemetry stream normalized — 60Hz sampling rate locked',
+    ];
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      const delay = 8000 + Math.random() * 7000; // 8-15 seconds
+      timeoutId = setTimeout(() => {
+        const msg = AGENTIC_MESSAGES[Math.floor(Math.random() * AGENTIC_MESSAGES.length)];
+        const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setAgenticLogs(prev => [...prev.slice(-30), `[${ts}] ${msg}`]);
+        scheduleNext();
+      }, delay);
+    };
+    // Seed with a few initial logs
+    setAgenticLogs([
+      `[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] Aethelis OS booted — agentic command flow online`,
+      `[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] ELSX core nodes initialized — 6 endpoints active`,
+    ]);
+    scheduleNext();
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    agenticLogEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [agenticLogs]);
+
   const openApp = (app: AppConfig) => {
     setLaunchpadOpen(false);
     setMobileMenuOpen(false);
@@ -470,7 +575,7 @@ export default function AethelisOS() {
   const bringToFront = (id: string) => {
     setWindows(p => {
       const maxZ = p.length > 0 ? Math.max(...p.map(w => w.zIndex)) : 10;
-      return p.map(w => w.id === id ? { ...w, zIndex: Math.min(maxZ + 1, 90) } : w);
+      return p.map(w => w.id === id ? { ...w, zIndex: maxZ + 1 } : w);
     });
     setActiveWindowId(id);
   };
@@ -488,9 +593,13 @@ export default function AethelisOS() {
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || isMobile) return;
-    const nx = Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - 120));
-    const ny = Math.max(36, Math.min(e.clientY - dragOffset.y, window.innerHeight - 120));
-    setWindows(p => p.map(w => w.id === isDragging ? { ...w, x: nx, y: ny } : w));
+    const win = windows.find(w => w.id === isDragging);
+    const w = win?.width ?? 400;
+    const h = win?.height ?? 300;
+    // Clamp: ensure at least 120px visible on left/right, 36px top, 80px bottom
+    const nx = Math.max(-(w - 120), Math.min(e.clientX - dragOffset.x, window.innerWidth - 120));
+    const ny = Math.max(36, Math.min(e.clientY - dragOffset.y, window.innerHeight - 80));
+    setWindows(p => p.map(wnd => wnd.id === isDragging ? { ...wnd, x: nx, y: ny } : wnd));
   };
 
   const handleMouseUp = () => setIsDragging(null);
@@ -638,14 +747,59 @@ export default function AethelisOS() {
       setVaultFiles(data as VaultFile[]);
       // Request real local files from the backend daemon
       sendCommand({ type: 'VAULT_LIST_FILES' });
+      // Phase 11: Unlock secure local IndexedDB vault
+      const pp = vaultPassphrase || 'aethelis_default';
+      const notes = await unlockVault(pp);
+      setSecureNotes(notes);
       setVaultAuthed(true);
-      logSystem('vault', 'sys', 'Bio-Pulse Vault unlocked. Zero-trust handshake complete.');
+      logSystem('vault', 'sys', 'Bio-Pulse Vault unlocked. Zero-trust handshake complete. Secure local storage engaged.');
     } catch {
       logSystem('vault', 'err', 'VOID-PROTOCOL: Retinal sync failed. Authentication rejected.');
     } finally {
       setVaultLoading(false);
     }
-  }, [logSystem, sendCommand]);
+  }, [logSystem, sendCommand, vaultPassphrase]);
+
+  // Phase 11: Save a new encrypted note to IndexedDB
+  const handleSaveNote = useCallback(async () => {
+    if (!vaultNoteTitle.trim() && !vaultNoteContent.trim()) return;
+    setVaultSaving(true);
+    try {
+      await saveNote(vaultNoteTitle.trim() || 'Untitled', vaultNoteContent.trim());
+      const notes = await listNotes();
+      setSecureNotes(notes);
+      setVaultNoteTitle('');
+      setVaultNoteContent('');
+      setVaultShowNewNote(false);
+      logSystem('vault', 'sys', `Secure note encrypted and stored locally (AES-256-GCM).`);
+    } catch (err) {
+      logSystem('vault', 'err', `Failed to save note: ${(err as Error).message}`);
+    } finally {
+      setVaultSaving(false);
+    }
+  }, [vaultNoteTitle, vaultNoteContent, logSystem]);
+
+  // Phase 11: Delete a note
+  const handleDeleteNote = useCallback(async (id: string) => {
+    try {
+      await deleteNote(id);
+      const notes = await listNotes();
+      setSecureNotes(notes);
+      logSystem('vault', 'info', 'Secure note purged from local storage.');
+    } catch (err) {
+      logSystem('vault', 'err', `Failed to delete note: ${(err as Error).message}`);
+    }
+  }, [logSystem]);
+
+  // Phase 11: Lock vault and clear secure data
+  const handleVaultLock = useCallback(() => {
+    lockVault();
+    setVaultAuthed(false);
+    setSecureNotes([]);
+    setVaultFiles([]);
+    setVaultShowNewNote(false);
+    logSystem('vault', 'info', 'Vault locked. Encryption key purged from memory.');
+  }, [logSystem]);
 
   // Phase 9: Sync backend fs vault files into the UI state
   useEffect(() => {
@@ -1187,6 +1341,25 @@ export default function AethelisOS() {
                   <span className={`text-[8px] uppercase shrink-0 hidden sm:inline ${ev.category === 'security' ? 'text-red-400' : ev.category === 'ledger' ? 'text-amber-400' : 'text-sky-400'}`}>{ev.category}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Phase 11: Agentic Command Flow — auto-scrolling log */}
+          <div className="flex-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col min-h-[120px]">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                <span className="text-[9px] uppercase tracking-widest text-white/40">Agentic Command Flow</span>
+              </div>
+              <span className="text-[8px] font-mono text-cyan-400/40">AUTO</span>
+            </div>
+            <div ref={agenticLogRef} className="space-y-1 flex-1 overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
+              {agenticLogs.map((log, i) => (
+                <div key={i} className="text-[9px] sm:text-[10px] font-mono text-cyan-300/60 leading-relaxed py-0.5">
+                  {log}
+                </div>
+              ))}
+              <div ref={agenticLogEndRef} />
             </div>
           </div>
         </div>
@@ -2083,22 +2256,33 @@ export default function AethelisOS() {
               <div className="absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0 0 60px rgba(139,92,246,0.2)' }}></div>
             </div>
             <h2 className="text-xl sm:text-2xl font-extralight text-white/85 mb-2 tracking-wide">Bio-Pulse Vault</h2>
-            <p className="text-[10px] sm:text-[11px] text-white/35 mb-6 sm:mb-10 text-center max-w-[260px] sm:max-w-[280px] leading-relaxed px-4">
-              {vaultLoading ? 'Authenticating biometric signature via Supabase zero-trust gateway...' : 'Biometric synchronization required. Retinal scan initiated.'}
+            <p className="text-[10px] sm:text-[11px] text-white/35 mb-4 sm:mb-6 text-center max-w-[280px] leading-relaxed px-4">
+              {vaultLoading ? 'Authenticating biometric signature via Supabase zero-trust gateway...' : 'Enter your secure passphrase to unlock the encrypted local vault. Notes are encrypted with AES-256-GCM before storage.'}
             </p>
+            {!vaultLoading && (
+              <input
+                type="password"
+                value={vaultPassphrase}
+                onChange={e => setVaultPassphrase(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleVaultAuth(); }}
+                placeholder="Passphrase (optional — defaults to system key)"
+                className="mb-4 w-[240px] sm:w-[280px] bg-white/5 border border-violet-500/20 rounded-xl px-4 py-2.5 text-[11px] text-white/80 placeholder-white/20 outline-none focus:border-violet-500/40 transition-colors text-center"
+              />
+            )}
             <button onClick={handleVaultAuth}
               disabled={vaultLoading}
               className="relative group min-h-[48px] sm:min-h-0 px-6 sm:px-8 disabled:opacity-50">
               <div className="absolute -inset-1 rounded-xl sm:rounded-2xl bg-violet-600/30 blur transition-all group-active:bg-violet-500/40"></div>
               <div className="relative btn-glass bg-violet-600/80 active:bg-violet-500/90 text-white px-6 sm:px-8 py-3 sm:py-3 rounded-xl text-[11px] sm:text-[11px] font-semibold transition-all flex items-center gap-2 border border-violet-400/30 min-h-[48px] sm:min-h-0 justify-center">
-                <Eye size={16} className="sm:text-[14px]"/> <span>{vaultLoading ? 'Syncing...' : 'Simulate Retinal Sync'}</span>
+                <Eye size={16} className="sm:text-[14px]"/> <span>{vaultLoading ? 'Syncing...' : 'Unlock Vault'}</span>
               </div>
             </button>
-            <p className="text-[8px] sm:text-[9px] text-white/20 mt-4 sm:mt-6 font-mono">PROTOCOL: VP-7749</p>
+            <p className="text-[8px] sm:text-[9px] text-white/20 mt-4 sm:mt-6 font-mono">PROTOCOL: VP-7749 · AES-256-GCM · PBKDF2-150K</p>
           </div>
         );
         return (
           <div className="h-full bg-slate-950/95 text-white p-3 sm:p-5 md:p-6 flex flex-col gap-3 sm:gap-4">
+            {/* Header */}
             <div className="flex justify-between items-center pb-2 sm:pb-3 border-b border-white/[0.07] shrink-0">
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="relative">
@@ -2106,41 +2290,109 @@ export default function AethelisOS() {
                   <div className="absolute -inset-2 rounded-full bg-violet-400/10 blur"></div>
                 </div>
                 <div>
-                  <h2 className="text-base sm:text-lg font-light text-white/85">Archives</h2>
-                  <p className="text-[8px] sm:text-[9px] text-white/35">{vaultFiles.length} documents</p>
+                  <h2 className="text-base sm:text-lg font-light text-white/85">Secure Archives</h2>
+                  <p className="text-[8px] sm:text-[9px] text-white/35">{secureNotes.length} encrypted notes · {vaultFiles.length} daemon files</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
+                <button onClick={() => setVaultShowNewNote(s => !s)}
+                  className="flex items-center gap-1.5 bg-violet-600/20 border border-violet-500/30 text-violet-300 px-2.5 py-1.5 rounded-lg text-[9px] font-semibold hover:bg-violet-600/30 transition-colors">
+                  <Plus size={11}/> New Secure Note
+                </button>
                 <span className="text-[8px] sm:text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 sm:px-2.5 py-1 rounded flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>OPEN
                 </span>
-                <button onClick={() => { setVaultAuthed(false); setVaultFiles([]); }} className="text-white/30 active:text-white/60 transition-colors p-2 sm:p-1 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center">
+                <button onClick={handleVaultLock} className="text-white/30 active:text-white/60 transition-colors p-2 sm:p-1 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center">
                   <Lock size={14}/>
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 flex-1 overflow-y-auto content-start">
-              {vaultFiles.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center py-12 gap-3">
+
+            {/* New note composer */}
+            {vaultShowNewNote && (
+              <div className="card-glass rounded-xl p-3 sm:p-4 flex flex-col gap-2 shrink-0 border border-violet-500/20">
+                <input
+                  type="text"
+                  value={vaultNoteTitle}
+                  onChange={e => setVaultNoteTitle(e.target.value)}
+                  placeholder="Note title..."
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-white/80 placeholder-white/20 outline-none focus:border-violet-500/40 transition-colors"
+                />
+                <textarea
+                  value={vaultNoteContent}
+                  onChange={e => setVaultNoteContent(e.target.value)}
+                  placeholder="Write your secure note here. This will be encrypted with AES-256-GCM before saving to IndexedDB..."
+                  rows={4}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white/70 placeholder-white/20 outline-none focus:border-violet-500/40 transition-colors resize-none font-mono"
+                />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setVaultShowNewNote(false)}
+                    className="text-[9px] text-white/40 hover:text-white/60 px-3 py-1.5 rounded-lg transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={handleSaveNote} disabled={vaultSaving}
+                    className="flex items-center gap-1.5 bg-violet-600/30 border border-violet-500/40 text-violet-200 px-3 py-1.5 rounded-lg text-[9px] font-semibold hover:bg-violet-600/40 transition-colors disabled:opacity-50">
+                    {vaultSaving ? <RefreshCw size={10} className="animate-spin"/> : <Lock size={10}/>}
+                    {vaultSaving ? 'Encrypting...' : 'Encrypt & Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Secure notes grid */}
+            <div className="flex-1 overflow-y-auto space-y-2">
+              {secureNotes.length > 0 && (
+                <>
+                  <p className="text-[8px] uppercase tracking-widest text-violet-400/50 font-mono px-1">Encrypted Local Notes</p>
+                  {secureNotes.map(note => (
+                    <div key={note.id} className="card-glass rounded-xl p-3 flex flex-col gap-1.5 group cursor-default">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Lock size={10} className="text-violet-400/60"/>
+                          <span className="text-[10px] font-mono text-white/70">{note.title}</span>
+                        </div>
+                        <button onClick={() => handleDeleteNote(note.id)}
+                          className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 transition-all p-1">
+                          <Trash2 size={11}/>
+                        </button>
+                      </div>
+                      {note.content && (
+                        <p className="text-[9px] text-white/40 leading-relaxed line-clamp-2 font-mono">{note.content}</p>
+                      )}
+                      <p className="text-[7px] text-white/20 font-mono">{new Date(note.updatedAt).toLocaleString()}</p>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Daemon files (legacy Phase 9) */}
+              {vaultFiles.length > 0 && (
+                <>
+                  <p className="text-[8px] uppercase tracking-widest text-white/30 font-mono px-1 pt-2">Daemon Files</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 content-start">
+                    {vaultFiles.map(doc => (
+                      <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.encrypted ? 'opacity-60' : ''}`}>
+                        <div className="relative">
+                          <FileText size={24} className="text-white/30 group-hover:text-violet-400 transition-colors" />
+                          {doc.encrypted && <Lock size={10} className="absolute -bottom-1 -right-1 text-amber-400" />}
+                        </div>
+                        <span className="text-[8px] font-mono text-white/40 group-hover:text-violet-400/70 transition-colors text-center">{doc.name}</span>
+                        <span className="text-[7px] uppercase text-white/25">{doc.file_type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {secureNotes.length === 0 && vaultFiles.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
                   <Fingerprint size={32} className="text-violet-500/30" />
                   <p className="text-[10px] sm:text-[11px] text-white/30 font-mono tracking-wider">NO ASSETS SECURED</p>
                   <p className="text-[8px] sm:text-[9px] text-white/20 text-center max-w-[240px]">
-                    {daemonConnected
-                      ? 'Storage directory is empty. Upload files to secure them locally.'
-                      : 'Connect to the Aethelis daemon to access local secure storage.'}
+                    Click "New Secure Note" to create an encrypted note. Notes are stored locally in IndexedDB with AES-256-GCM encryption.
                   </p>
                 </div>
               )}
-              {vaultFiles.map(doc => (
-                <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.encrypted ? 'opacity-60' : ''}`}>
-                  <div className="relative">
-                    <FileText size={24} className="text-white/30 group-hover:text-violet-400 transition-colors" />
-                    {doc.encrypted && <Lock size={10} className="absolute -bottom-1 -right-1 text-amber-400" />}
-                  </div>
-                  <span className="text-[8px] font-mono text-white/40 group-hover:text-violet-400/70 transition-colors text-center">{doc.name}</span>
-                  <span className="text-[7px] uppercase text-white/25">{doc.file_type}</span>
-                </div>
-              ))}
             </div>
           </div>
         );
