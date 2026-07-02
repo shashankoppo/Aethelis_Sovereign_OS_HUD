@@ -2,8 +2,13 @@
 // Offline-first encrypted storage. Files/notes are encrypted client-side with
 // AES-GCM before being persisted to IndexedDB. The encryption key is derived
 // from a passphrase via PBKDF2 and held in memory only while the vault is open.
+//
+// Phase 12: Zero-Trust Client-Side Encryption
+// IndexedDB Store: AethelisVaultDB
+// Object Store: secure_notes with keyPath 'id'
+// Record Schema: { id: string, encryptedData: ArrayBuffer, iv: Uint8Array, timestamp: string }
 
-const DB_NAME = 'aethelis_vault';
+const DB_NAME = 'AethelisVaultDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'secure_notes';
 const SALT_KEY = 'aethelis_vault_salt';
@@ -18,10 +23,11 @@ export interface SecureNote {
 
 interface StoredRecord {
   id: string;
+  encryptedData: ArrayBuffer;
   iv: Uint8Array;
-  ciphertext: ArrayBuffer;
-  createdAt: number;
-  updatedAt: number;
+  timestamp: string;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 let cryptoKey: CryptoKey | null = null;
@@ -119,7 +125,7 @@ export async function listNotes(): Promise<SecureNote[]> {
   for (const rec of records) {
     try {
       const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: rec.iv }, cryptoKey, rec.ciphertext
+        { name: 'AES-GCM', iv: rec.iv }, cryptoKey, rec.encryptedData
       );
       const text = new TextDecoder().decode(decrypted);
       const parsed = JSON.parse(text) as { title: string; content: string };
@@ -127,16 +133,16 @@ export async function listNotes(): Promise<SecureNote[]> {
         id: rec.id,
         title: parsed.title,
         content: parsed.content,
-        createdAt: rec.createdAt,
-        updatedAt: rec.updatedAt,
+        createdAt: rec.createdAt ?? Date.now(),
+        updatedAt: rec.updatedAt ?? Date.now(),
       });
     } catch {
       notes.push({
         id: rec.id,
         title: '[Decryption Failed]',
         content: '',
-        createdAt: rec.createdAt,
-        updatedAt: rec.updatedAt,
+        createdAt: rec.createdAt ?? Date.now(),
+        updatedAt: rec.updatedAt ?? Date.now(),
       });
     }
   }
@@ -149,10 +155,17 @@ export async function saveNote(title: string, content: string): Promise<SecureNo
   const id = `note_${now}_${Math.random().toString(36).slice(2, 8)}`;
   const plaintext = JSON.stringify({ title, content });
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
+  const encryptedData = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(plaintext)
   );
-  await dbPut({ id, iv, ciphertext, createdAt: now, updatedAt: now });
+  await dbPut({
+    id,
+    encryptedData,
+    iv,
+    timestamp: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
+  });
   return { id, title, content, createdAt: now, updatedAt: now };
 }
 

@@ -6,7 +6,7 @@ import {
   Fingerprint, Smartphone, Unlock, Eye, FileText,
   Server, Shield, LayoutGrid, Play, Cpu, HardDrive,
   Zap, TrendingUp, TrendingDown, Lock, Radio, ArrowUpRight,
-  Plus, Trash2, RefreshCw, ChevronRight,
+  Plus, Trash2, RefreshCw, ChevronRight, CircleDot,
   ArrowUp, ArrowDown, Layers, Menu, Folder, FolderOpen, FolderPlus,
   Image, Music, Video, File, Download, Upload, Cloud,
   Bell, Pause, PlayCircle, StopCircle, Power, LogOut,
@@ -29,12 +29,16 @@ import {
 import type { OracleConfig, ElsxLead, ElsxShipment, ElsxAllocation, ProxyNode, BlockEvent, AthBalance } from './lib/api';
 import { useHardwareTelemetry } from './hooks/useHardwareTelemetry';
 import { unlockVault, lockVault, listNotes, saveNote, deleteNote, type SecureNote } from './lib/secureVault';
+import { agenticScheduler, useAgenticEvents, agenticEventBus, type AgenticEvent } from './lib/AgenticScheduler';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+type SphereKey = 'CORE' | 'INTEL' | 'RESOURCE' | 'WEALTH' | 'SECURITY';
 
 interface AppConfig {
   id: string; title: string; icon: React.ElementType;
   color: string; bg: string; gradient: string; desc: string;
+  sphere?: SphereKey;
 }
 interface WindowState extends AppConfig {
   x: number; y: number; width: number; height: number;
@@ -42,21 +46,56 @@ interface WindowState extends AppConfig {
 }
 interface TermLog { type: 'user' | 'sys' | 'info' | 'err'; text: string; }
 
-// ─── App Registry ─────────────────────────────────────────────────────────────
+// ─── The Five Spheres of Totality (Phase 14) ───────────────────────────────
 
-const APPS: Record<string, AppConfig> = {
-  DASHBOARD: { id: 'dashboard', title: 'Atmosphere Control', icon: Activity,    color: 'text-sky-400',    bg: 'bg-sky-500',    gradient: 'from-sky-500 to-blue-600', desc: 'Planetary network monitoring' },
-  MANIFESTO: { id: 'manifesto', title: 'The Manifesto',      icon: BookOpen,    color: 'text-rose-400',   bg: 'bg-rose-500',   gradient: 'from-rose-500 to-pink-600', desc: 'Missions & Visions' },
-  ENTERPRISE:{ id: 'enterprise',title: 'ELSX Enterprise',   icon: Network,     color: 'text-violet-400', bg: 'bg-violet-600', gradient: 'from-violet-500 to-purple-700', desc: 'Business operations suite' },
-  MARKET:    { id: 'market',    title: 'Omni-Market',       icon: ShoppingBag, color: 'text-emerald-400',bg: 'bg-emerald-500',gradient: 'from-emerald-500 to-teal-600', desc: 'Module marketplace' },
-  LEDGER:    { id: 'ledger',    title: 'Sovereign Ledger',  icon: Coins,       color: 'text-amber-400',  bg: 'bg-amber-500',  gradient: 'from-amber-400 to-orange-600', desc: 'Decentralized economy' },
-  ORACLE:    { id: 'oracle',    title: 'Q-Bit Core',        icon: Sparkles,    color: 'text-purple-400', bg: 'bg-purple-600', gradient: 'from-purple-500 to-violet-700', desc: 'AI prophetic interface' },
-  EMULATOR:  { id: 'emulator',  title: 'Omni-Emulator',    icon: Smartphone,  color: 'text-cyan-400',   bg: 'bg-cyan-500',   gradient: 'from-cyan-500 to-sky-600', desc: 'Virtual environment' },
-  NEXUS:     { id: 'nexus',     title: 'Kali-Nexus',       icon: ShieldAlert, color: 'text-red-400',    bg: 'bg-red-600',    gradient: 'from-red-600 to-rose-700', desc: 'Security & pentest' },
-  VAULT:     { id: 'vault',     title: 'Bio-Pulse Vault',  icon: Fingerprint, color: 'text-violet-400', bg: 'bg-violet-700', gradient: 'from-violet-600 to-fuchsia-700', desc: 'Biometric archives' },
-  KERNEL:    { id: 'kernel',    title: 'System Terminal',  icon: Terminal,    color: 'text-slate-300',  bg: 'bg-slate-700',  gradient: 'from-slate-600 to-slate-800', desc: 'Command interface' },
-  FILES:     { id: 'files',     title: 'Files',            icon: Folder,      color: 'text-blue-400',   bg: 'bg-blue-500',  gradient: 'from-blue-500 to-indigo-600',  desc: 'File manager' },
-  SETTINGS:  { id: 'settings',  title: 'System Preferences',icon: Settings,    color: 'text-gray-400',   bg: 'bg-gray-600',  gradient: 'from-gray-500 to-gray-700',   desc: 'System settings' },
+const SPHERES = {
+  CORE: { name: 'Sphere I: Core & Control', desc: 'System Core', color: 'text-cyan-400', border: 'border-cyan-500/30' },
+  INTEL: { name: 'Sphere II: Intelligence & Philosophy', desc: 'Intelligence', color: 'text-purple-400', border: 'border-purple-500/30' },
+  RESOURCE: { name: 'Sphere III: Resource & Logistics', desc: 'Operations', color: 'text-emerald-400', border: 'border-emerald-500/30' },
+  WEALTH: { name: 'Sphere IV: Private Wealth', desc: 'Treasury', color: 'text-amber-400', border: 'border-amber-500/30' },
+  SECURITY: { name: 'Sphere V: Zero-Trust Security', desc: 'Fortress', color: 'text-red-400', border: 'border-red-500/30' },
+};
+
+// ─── App Registry (Phase 14: Five Spheres Architecture) ─────────────────────
+
+const APPS: Record<string, AppConfig & { sphere: SphereKey }> = {
+  // Sphere I: Core & Control
+  DASHBOARD: { id: 'dashboard', title: 'Atmosphere Control', icon: Activity,    color: 'text-sky-400',    bg: 'bg-sky-500',    gradient: 'from-sky-500 to-blue-600', desc: 'Planetary network monitoring', sphere: 'CORE' },
+  SETTINGS:  { id: 'settings',  title: 'System Preferences', icon: Settings,    color: 'text-gray-400',   bg: 'bg-gray-600',  gradient: 'from-gray-500 to-gray-700',   desc: 'System settings', sphere: 'CORE' },
+  KERNEL:    { id: 'kernel',    title: 'System Terminal',  icon: Terminal,    color: 'text-slate-300',  bg: 'bg-slate-700',  gradient: 'from-slate-600 to-slate-800', desc: 'Command interface', sphere: 'CORE' },
+  FILES:     { id: 'files',     title: 'Files',            icon: Folder,      color: 'text-blue-400',   bg: 'bg-blue-500',  gradient: 'from-blue-500 to-indigo-600',  desc: 'File manager', sphere: 'CORE' },
+
+  // Sphere II: Intelligence & Philosophy
+  ORACLE:    { id: 'oracle',    title: 'Q-Bit Core',        icon: Sparkles,    color: 'text-purple-400', bg: 'bg-purple-600', gradient: 'from-purple-500 to-violet-700', desc: 'AI prophetic interface', sphere: 'INTEL' },
+  MANIFESTO: { id: 'manifesto', title: 'The Manifesto',      icon: BookOpen,    color: 'text-rose-400',   bg: 'bg-rose-500',   gradient: 'from-rose-500 to-pink-600', desc: 'Missions & Visions', sphere: 'INTEL' },
+
+  // Sphere III: Resource & Logistics
+  ENTERPRISE:{ id: 'enterprise',title: 'ELSX Enterprise',   icon: Network,     color: 'text-violet-400', bg: 'bg-violet-600', gradient: 'from-violet-500 to-purple-700', desc: 'Business operations suite', sphere: 'RESOURCE' },
+  MARKET:    { id: 'market',    title: 'Omni-Market',       icon: ShoppingBag, color: 'text-emerald-400',bg: 'bg-emerald-500',gradient: 'from-emerald-500 to-teal-600', desc: 'Module marketplace', sphere: 'RESOURCE' },
+
+  // Sphere IV: Private Wealth
+  LEDGER:    { id: 'ledger',    title: 'Sovereign Ledger',  icon: Coins,       color: 'text-amber-400',  bg: 'bg-amber-500',  gradient: 'from-amber-400 to-orange-600', desc: 'Decentralized economy', sphere: 'WEALTH' },
+
+  // Sphere V: Zero-Trust Security
+  VAULT:     { id: 'vault',     title: 'Bio-Pulse Vault',  icon: Fingerprint, color: 'text-violet-400', bg: 'bg-violet-700', gradient: 'from-violet-600 to-fuchsia-700', desc: 'Biometric archives', sphere: 'SECURITY' },
+  NEXUS:     { id: 'nexus',     title: 'Kali-Nexus',       icon: ShieldAlert, color: 'text-red-400',    bg: 'bg-red-600',    gradient: 'from-red-600 to-rose-700', desc: 'Security & pentest', sphere: 'SECURITY' },
+  EMULATOR:  { id: 'emulator',  title: 'Omni-Emulator',    icon: Smartphone,  color: 'text-cyan-400',   bg: 'bg-cyan-500',   gradient: 'from-cyan-500 to-sky-600', desc: 'Virtual environment', sphere: 'SECURITY' },
+};
+
+// App-specific neon border colors (top-edge highlight)
+const APP_NEON_BORDERS: Record<string, string> = {
+  dashboard: 'border-t-cyan-500/50',
+  manifesto: 'border-t-rose-500/50',
+  enterprise: 'border-t-violet-500/50',
+  market: 'border-t-emerald-500/50',
+  ledger: 'border-t-amber-500/50',
+  oracle: 'border-t-purple-500/50',
+  emulator: 'border-t-cyan-400/50',
+  nexus: 'border-t-red-500/50',
+  vault: 'border-t-fuchsia-500/50',
+  kernel: 'border-t-slate-400/50',
+  files: 'border-t-blue-500/50',
+  settings: 'border-t-gray-400/50',
 };
 
 // ─── Mini Components ─────────────────────────────────────────────────────────
@@ -74,10 +113,16 @@ function Sparkline({ data, color, h = 36 }: { data: number[]; color: string; h?:
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
+        <filter id={`spark-glow-${color.replace('#','')}`}>
+          <feGaussianBlur stdDeviation="1.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
       </defs>
       <polygon points={area} fill={`url(#${id})`} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={(data.length - 1) / (data.length - 1) * W} cy={h - ((data[data.length - 1] - min) / range) * (h - 4) - 2} r="2.5" fill={color} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"
+        filter={`url(#spark-glow-${color.replace('#','')})`} />
+      <circle cx={(data.length - 1) / (data.length - 1) * W} cy={h - ((data[data.length - 1] - min) / range) * (h - 4) - 2} r="2.5" fill={color}
+        filter={`url(#spark-glow-${color.replace('#','')})`} />
     </svg>
   );
 }
@@ -131,7 +176,7 @@ function Squircle({ children, color, size = 'md', className = '' }: {
   );
 }
 
-// ─── Concentric Ring Chart for CPU/RAM ─────────────────────────────────────────
+// ─── Concentric Ring Chart for CPU/RAM (Phase 13 Enhanced) ─────────────────────
 
 function ConcentricRing({ value, max, color, label, size = 80 }: {
   value: number; max: number; color: string; label: string; size?: number;
@@ -139,22 +184,31 @@ function ConcentricRing({ value, max, color, label, size = 80 }: {
   const r = size / 2 - 8, circ = 2 * Math.PI * r;
   const dash = Math.min(value / max, 1) * circ * 0.75;
   const cx = size / 2, cy = size / 2;
+  const colorId = color.replace('#', '');
 
   return (
     <div className="flex flex-col items-center gap-2">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <defs>
-          <filter id={`glow-${color.replace('#','')}`}>
-            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <filter id={`glow-${colorId}`} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
             <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
+          <linearGradient id={`grad-${colorId}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="1" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.6" />
+          </linearGradient>
         </defs>
+        {/* Background ring */}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="6" />
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
+        {/* Progress ring with glow */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={`url(#grad-${colorId})`} strokeWidth="6"
           strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={circ * 0.125}
           strokeLinecap="round" transform={`rotate(135 ${cx} ${cy})`}
-          filter={`url(#glow-${color.replace('#','')})`} />
-        <text x={cx} y={cy - 4} textAnchor="middle" fill="white" fontSize="14" fontWeight="600" fontFamily="monospace">
+          filter={`url(#glow-${colorId})`} />
+        {/* Value text with glow */}
+        <text x={cx} y={cy - 4} textAnchor="middle" fill={color} fontSize="14" fontWeight="600" fontFamily="monospace"
+          style={{ filter: `drop-shadow(0 0 6px ${color})` }}>
           {typeof value === 'number' ? value.toFixed(1) : value}
         </text>
         <text x={cx} y={cy + 12} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="8" fontFamily="monospace">
@@ -162,6 +216,45 @@ function ConcentricRing({ value, max, color, label, size = 80 }: {
         </text>
       </svg>
     </div>
+  );
+}
+
+// ─── GlowLineChart Widget (Phase 13) ─────────────────────────────────────────
+
+function GlowLineChart({ data, color, h = 44, showGrid = false }: {
+  data: number[]; color: string; h?: number; showGrid?: boolean;
+}) {
+  const W = 140;
+  const max = Math.max(...data, 1), min = Math.min(...data, 0), range = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * W},${h - ((v - min) / range) * (h - 6) - 3}`).join(' ');
+  const area = `${pts} ${W},${h} 0,${h}`;
+  const colorId = color.replace('#', '');
+
+  return (
+    <svg width={W} height={h} viewBox={`0 0 ${W} ${h}`} className="overflow-visible">
+      <defs>
+        <linearGradient id={`area-${colorId}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+        <filter id={`line-glow-${colorId}`}>
+          <feGaussianBlur stdDeviation="2" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      {/* Optional grid lines */}
+      {showGrid && [0.25, 0.5, 0.75].map((pct, i) => (
+        <line key={i} x1="0" y1={h * pct} x2={W} y2={h * pct} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+      ))}
+      {/* Filled area */}
+      <polygon points={area} fill={`url(#area-${colorId})`} />
+      {/* Line with glow */}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+        filter={`url(#line-glow-${colorId})`} />
+      {/* End dot */}
+      <circle cx={(data.length - 1) / (data.length - 1) * W} cy={h - ((data[data.length - 1] - min) / range) * (h - 6) - 3}
+        r="3" fill={color} filter={`url(#line-glow-${colorId})`} />
+    </svg>
   );
 }
 
@@ -272,6 +365,10 @@ export default function AethelisOS() {
   const agenticLogRef = useRef<HTMLDivElement>(null);
   const agenticLogEndRef = useRef<HTMLDivElement>(null);
 
+  // Phase 12: Wire AgenticScheduler events to Dashboard Ledger
+  const agenticEvents = useAgenticEvents(35);
+  const [schedulerEnabled, setSchedulerEnabled] = useState(false);
+
   // App-specific
   const [enterpriseTab,  setEnterpriseTab]  = useState<'Logistics'|'CRM'|'Wealth'|'System'|'Scheduler'>('Logistics');
   const [scanProgress,   setScanProgress]   = useState(false);
@@ -325,13 +422,56 @@ export default function AethelisOS() {
   const termEndRef = useRef<HTMLDivElement>(null);
   const oracleEndRef = useRef<HTMLDivElement>(null);
 
+  // ─── Phase 14: Logic Engines State ─────────────────────────────────────────
+
+  // Ledger: Pricing Engine
+  const [athPriceHistory, setAthPriceHistory] = useState<number[]>(() =>
+    Array.from({ length: 60 }, (_, i) => 124500 + Math.sin(i * 0.1) * 2000 + Math.random() * 500)
+  );
+  const [athCurrentPrice, setAthCurrentPrice] = useState(124500);
+  const [nftAssets, setNftAssets] = useState<Array<{ id: string; name: string; minted: string }>>([]);
+
+  // Market: Deployment Flow
+  const [deployingModule, setDeployingModule] = useState<string | null>(null);
+  const [deployProgress, setDeployProgress] = useState(0);
+  const [deployLogs, setDeployLogs] = useState<string[]>([]);
+
+  // ELSX: Sorting & Filtering
+  const [elsxSortKey, setElsxSortKey] = useState<keyof ElsxLead | null>(null);
+  const [elsxSortDir, setElsxSortDir] = useState<'asc' | 'desc'>('asc');
+  const [elsxSearch, setElsxSearch] = useState('');
+
+  // Vault: Modal editing
+  const [vaultEditNote, setVaultEditNote] = useState<SecureNote | null>(null);
+  const [vaultEditContent, setVaultEditContent] = useState('');
+  const [vaultEditSaving, setVaultEditSaving] = useState(false);
+
+  // ELSX CRM: New lead form
+  const [showNewLead, setShowNewLead] = useState(false);
+  const [newLeadForm, setNewLeadForm] = useState({ name: '', contact: '', stage: 'New', revenue: '' });
+  const [newLeadSaving, setNewLeadSaving] = useState(false);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+
+  // Files: active section + selected file
+  const [filesSection, setFilesSection] = useState<'local' | 'vault'>('local');
+  const [selectedVaultFile, setSelectedVaultFile] = useState<string | null>(null);
+  const [dbVaultFiles, setDbVaultFiles] = useState<VaultFile[]>([]);
+
+  // Oracle: quick prompt suggestions shown flag
+  const [oraclePrompted, setOraclePrompted] = useState(false);
+
+  // Manifesto: interactive sections
+  const [manifestoSection, setManifestoSection] = useState<'principles' | 'roadmap' | 'covenant'>('principles');
+  const [expandedTenet, setExpandedTenet] = useState<string | null>(null);
+  const [signedCovenant, setSignedCovenant] = useState(false);
+
   // ─── Fetch DB ────────────────────────────────────────────────────
 
   const fetchAll = useCallback(async () => {
     setDbLoading(true);
     setDbError(false);
     try {
-      const [ev, led, log, mod, slog, sa, om] = await Promise.all([
+      const [ev, led, log, mod, slog, sa, om, vf] = await Promise.all([
         supabase.from('system_events').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('ledger_transactions').select('*').order('created_at', { ascending: false }).limit(50),
         supabase.from('logistics_orders').select('*').order('created_at', { ascending: false }),
@@ -339,6 +479,7 @@ export default function AethelisOS() {
         supabase.from('system_logs').select('*').order('created_at', { ascending: false }).limit(60),
         supabase.from('sovereign_assets').select('*').eq('id', 1).maybeSingle(),
         supabase.from('oracle_memory').select('*').order('created_at', { ascending: true }).limit(50),
+        supabase.from('vault_files').select('*').order('created_at', { ascending: false }),
       ]);
       if (ev.data)  setEvents(ev.data as SystemEvent[]);
       if (led.data) setLedger(led.data as LedgerTransaction[]);
@@ -346,6 +487,7 @@ export default function AethelisOS() {
       if (mod.data) setModules(mod.data as MarketModule[]);
       if (slog.data) setSystemLogs(slog.data as SystemLog[]);
       if (sa.data)  setSovereignAssets(sa.data as SovereignAsset);
+      if (vf.data)  setDbVaultFiles(vf.data as VaultFile[]);
       if (om.data) {
         const mapped = (om.data as OracleMemory[]).map(m => ({ role: m.role, text: m.content }));
         if (mapped.length) setOracleMessages(mapped);
@@ -355,6 +497,11 @@ export default function AethelisOS() {
     } finally {
       setDbLoading(false);
     }
+  }, []);
+
+  const logSystem = useCallback(async (source: SystemLog['source'], level: SystemLog['level'], message: string) => {
+    const { data } = await supabase.from('system_logs').insert({ source, level, message }).select().single();
+    if (data) setSystemLogs(prev => [data as SystemLog, ...prev].slice(0, 60));
   }, []);
 
   // ─── Initialization ──────────────────────────────────────────────
@@ -417,25 +564,71 @@ export default function AethelisOS() {
     return () => clearTimeout(t);
   }, [emulatorEnv]);
 
+  // ─── Phase 14: ATH Pricing Engine ────────────────────────────────────────────
+
+  useEffect(() => {
+    let animationId: number;
+    let lastUpdate = Date.now();
+    const updateInterval = 100; // Update every 100ms for smooth animation
+
+    const tick = () => {
+      const now = Date.now();
+      if (now - lastUpdate >= updateInterval) {
+        lastUpdate = now;
+        setAthCurrentPrice(prev => {
+          // Slight upward trend with micro-volatility
+          const trend = 0.0001; // 0.01% upward drift per tick
+          const volatility = (Math.random() - 0.48) * 0.005; // Random walk
+          const newPrice = prev * (1 + trend + volatility);
+          setAthPriceHistory(hist => [...hist.slice(-59), newPrice]);
+          return newPrice;
+        });
+      }
+      animationId = requestAnimationFrame(tick);
+    };
+    animationId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationId);
+  }, []);
+
+  // Mint Algorithmic NFT Handler
+  const handleMintNft = useCallback(() => {
+    const newNft = {
+      id: `nft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: `ATH Genesis #${nftAssets.length + 1}`,
+      minted: new Date().toISOString(),
+    };
+    setNftAssets(prev => [...prev, newNft]);
+    logSystem('ledger', 'sys', `Minted algorithmic NFT: ${newNft.name} on the sovereign chain.`);
+  }, [nftAssets.length, logSystem]);
+
   // ─── Window Management ────────────────────────────────────────────
 
   const windowsRef = useRef<WindowState[]>([]);
   useEffect(() => { windowsRef.current = windows; }, [windows]);
 
-  // Phase 11: Window Memory — persist positions/sizes/open state to localStorage
+  // Phase 14: Window Memory — debounced persistence to localStorage
   const WINDOW_STORAGE_KEY = 'aethelis_window_state';
+  const saveWindowStateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    try {
-      const state = windows.map(w => ({
-        id: w.id, x: w.x, y: w.y, width: w.width, height: w.height,
-        isMaximized: w.isMaximized, zIndex: w.zIndex,
-      }));
-      localStorage.setItem(WINDOW_STORAGE_KEY, JSON.stringify({
-        windows: state,
-        minimized,
-        activeWindowId,
-      }));
-    } catch {}
+    // Debounce saves by 300ms to prevent performance degradation during dragging
+    if (saveWindowStateRef.current) clearTimeout(saveWindowStateRef.current);
+    saveWindowStateRef.current = setTimeout(() => {
+      try {
+        const state = windows.map(w => ({
+          id: w.id, x: w.x, y: w.y, width: w.width, height: w.height,
+          isMaximized: w.isMaximized, zIndex: w.zIndex,
+        }));
+        localStorage.setItem(WINDOW_STORAGE_KEY, JSON.stringify({
+          windows: state,
+          minimized,
+          activeWindowId,
+        }));
+      } catch {}
+    }, 300);
+    return () => {
+      if (saveWindowStateRef.current) clearTimeout(saveWindowStateRef.current);
+    };
   }, [windows, minimized, activeWindowId]);
 
   // Restore window state on initial mount
@@ -452,7 +645,7 @@ export default function AethelisOS() {
         };
         if (parsed.windows?.length > 0) {
           const restored = parsed.windows.map(w => {
-            const config = APPS.find(a => a.id === w.id);
+            const config = Object.values(APPS).find(a => a.id === w.id);
             if (!config) return null;
             return { ...config, ...w };
           }).filter(Boolean) as WindowState[];
@@ -467,53 +660,36 @@ export default function AethelisOS() {
     setWindowsRestored(true);
   }, [windowsRestored]);
 
-  // Phase 11: Agentic Command Flow — dynamic log generation + auto-scroll
+  // Phase 12: AgenticScheduler — autonomous background operations
   useEffect(() => {
-    const AGENTIC_MESSAGES = [
-      'ELSX Route Optimization complete — 14 trade lanes recalculated',
-      'Node synchronization stable across all compute shards',
-      'Scraped external pricing delta — 3.2% deviation from oracle',
-      'Autonomous ledger reconciliation: 847 entries verified',
-      'Mesh heartbeat acknowledged — 6 peers responsive',
-      'Tensor weight checkpoint saved to local cache',
-      'Supply chain anomaly detected — rerouting shipment #4821',
-      'Oracle consensus reached — block 18,392 validated',
-      'Memory defragmentation cycle complete — 2.1 GB reclaimed',
-      'Network reconnaissance sweep finished — 23 devices mapped',
-      'Cryptographic handshake established with node ELSX-7',
-      'Background data aggregation pipeline flushed to vault',
-      'Threat assessment matrix updated — risk level: nominal',
-      'Compute worker pool scaled — 4 threads engaged for batch processing',
-      'Ledger synchronization daemon idle — awaiting next cycle',
-      'Vault integrity check passed — all 12 encrypted assets verified',
-      'Bandwidth saturation test concluded — 487 Mbps peak throughput',
-      'Smart contract execution confirmed — gas optimized at 21,000 units',
-      'Distributed cache invalidated — refreshing hot path entries',
-      'Telemetry stream normalized — 60Hz sampling rate locked',
-    ];
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const scheduleNext = () => {
-      const delay = 8000 + Math.random() * 7000; // 8-15 seconds
-      timeoutId = setTimeout(() => {
-        const msg = AGENTIC_MESSAGES[Math.floor(Math.random() * AGENTIC_MESSAGES.length)];
-        const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        setAgenticLogs(prev => [...prev.slice(-30), `[${ts}] ${msg}`]);
-        scheduleNext();
-      }, delay);
-    };
-    // Seed with a few initial logs
+    // Seed initial logs
     setAgenticLogs([
       `[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] Aethelis OS booted — agentic command flow online`,
       `[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] ELSX core nodes initialized — 6 endpoints active`,
+      `[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] Zero-Staff Paradigm engaged — autonomous operations standing by`,
     ]);
-    scheduleNext();
-    return () => clearTimeout(timeoutId);
+
+    // Subscribe to AgenticScheduler events
+    const unsubscribe = agenticEventBus.subscribe((event: AgenticEvent) => {
+      const ts = event.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const statusIcon = event.status === 'SUCCESS' ? '✓' : event.status === 'PENDING' ? '◐' : '✗';
+      const detail = event.detail ? ` — ${event.detail}` : '';
+      const logEntry = `[${ts}] ${statusIcon} [${event.subsystem}] ${event.action}${detail}`;
+      setAgenticLogs(prev => [...prev.slice(-40), logEntry]);
+    });
+
+    return () => {
+      unsubscribe();
+      agenticScheduler.stop();
+    };
   }, []);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     agenticLogEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [agenticLogs]);
+  }, [agenticLogs, agenticEvents]);
+
+
 
   const openApp = (app: AppConfig) => {
     setLaunchpadOpen(false);
@@ -594,11 +770,19 @@ export default function AethelisOS() {
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || isMobile) return;
     const win = windows.find(w => w.id === isDragging);
-    const w = win?.width ?? 400;
-    const h = win?.height ?? 300;
-    // Clamp: ensure at least 120px visible on left/right, 36px top, 80px bottom
-    const nx = Math.max(-(w - 120), Math.min(e.clientX - dragOffset.x, window.innerWidth - 120));
-    const ny = Math.max(36, Math.min(e.clientY - dragOffset.y, window.innerHeight - 80));
+    if (!win) return;
+    const w = win.width;
+    const h = win.height;
+    // Phase 12: Strict viewport boundary enforcement
+    // Ensure at least 140px of the window remains visible on all edges
+    // This prevents users from losing access to traffic-light controls
+    const minVisible = 140;
+    const maxX = window.innerWidth - minVisible;
+    const maxY = window.innerHeight - minVisible;
+    const minX = -(w - minVisible);
+    const minY = 36; // Menu bar height
+    const nx = Math.max(minX, Math.min(e.clientX - dragOffset.x, maxX));
+    const ny = Math.max(minY, Math.min(e.clientY - dragOffset.y, maxY));
     setWindows(p => p.map(wnd => wnd.id === isDragging ? { ...wnd, x: nx, y: ny } : wnd));
   };
 
@@ -727,12 +911,18 @@ export default function AethelisOS() {
     setTermInput('');
   };
 
-  // ─── DB Actions ──────────────────────────────────────────────────
-
-  const logSystem = useCallback(async (source: SystemLog['source'], level: SystemLog['level'], message: string) => {
-    const { data } = await supabase.from('system_logs').insert({ source, level, message }).select().single();
-    if (data) setSystemLogs(prev => [data as SystemLog, ...prev].slice(0, 60));
-  }, []);
+  // Toggle AgenticScheduler
+  const toggleScheduler = useCallback(() => {
+    if (schedulerEnabled) {
+      agenticScheduler.stop();
+      setSchedulerEnabled(false);
+      logSystem('kernel', 'info', 'AgenticScheduler suspended — autonomous operations halted.');
+    } else {
+      agenticScheduler.start();
+      setSchedulerEnabled(true);
+      logSystem('kernel', 'sys', 'AgenticScheduler engaged — Zero-Staff Paradigm active.');
+    }
+  }, [schedulerEnabled, logSystem]);
 
   const handleVaultAuth = useCallback(async () => {
     setVaultLoading(true);
@@ -924,19 +1114,79 @@ export default function AethelisOS() {
     setLogistics(p => p.map(o => o.id === id ? { ...o, status } : o));
   };
 
-  const toggleModule = async (mod: MarketModule) => {
-    const installed = !mod.installed;
-    await supabase.from('market_modules').update({ installed, installed_at: installed ? new Date().toISOString() : null }).eq('id', mod.id);
-    setModules(p => p.map(m => m.id === mod.id ? { ...m, installed, installed_at: installed ? new Date().toISOString() : null } : m));
-  };
+  // Phase 14: Deployment Flow with progress
+  const toggleModule = useCallback(async (mod: MarketModule) => {
+    if (mod.installed) {
+      // Uninstall immediately
+      await supabase.from('market_modules').update({ installed: false, installed_at: null }).eq('id', mod.id);
+      setModules(p => p.map(m => m.id === mod.id ? { ...m, installed: false, installed_at: null } : m));
+      logSystem('market', 'info', `Module ${mod.module_name} removed from the system.`);
+      return;
+    }
+
+    // Deployment flow with progress
+    setDeployingModule(mod.id);
+    setDeployProgress(0);
+    setDeployLogs([]);
+
+    const deploySteps = [
+      { msg: 'Initializing sovereign deployment pipeline...', delay: 600 },
+      { msg: 'Resolving peer dependencies...', delay: 500 },
+      { msg: 'Bypassing external auth protocols...', delay: 400 },
+      { msg: 'Injecting zero-trust certificates...', delay: 400 },
+      { msg: 'Establishing mesh network link...', delay: 500 },
+      { msg: 'Validating cryptographic signatures...', delay: 300 },
+      { msg: 'Integrating with OS kernel...', delay: 400 },
+      { msg: 'Finalizing deployment manifest...', delay: 300 },
+    ];
+
+    for (let i = 0; i < deploySteps.length; i++) {
+      setDeployProgress(((i + 1) / deploySteps.length) * 100);
+      setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${deploySteps[i].msg}`]);
+      await new Promise(r => setTimeout(r, deploySteps[i].delay));
+    }
+
+    // Complete deployment
+    await supabase.from('market_modules').update({ installed: true, installed_at: new Date().toISOString() }).eq('id', mod.id);
+    setModules(p => p.map(m => m.id === mod.id ? { ...m, installed: true, installed_at: new Date().toISOString() } : m));
+    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✓ Deployment complete — ${mod.module_name} is now integrated.`]);
+    logSystem('market', 'sys', `Module ${mod.module_name} successfully deployed and integrated.`);
+
+    setTimeout(() => {
+      setDeployingModule(null);
+      setDeployProgress(0);
+      setDeployLogs([]);
+    }, 1500);
+  }, [logSystem]);
 
   const addSystemEvent = async (msg: string, cat: SystemEvent['category']) => {
     const { data } = await supabase.from('system_events').insert({ category: cat, message: msg, severity: 'info' }).select().single();
     if (data) setEvents(p => [data as SystemEvent, ...p]);
   };
 
+  // ─── ELSX CRM: Add Lead ────────────────────────────────────────────────
+
+  const handleAddLead = useCallback(async () => {
+    if (!newLeadForm.name.trim() || newLeadSaving) return;
+    setNewLeadSaving(true);
+    const newLead: ElsxLead = {
+      id: `ELSX-${Date.now().toString(36).toUpperCase()}`,
+      name: newLeadForm.name.trim(),
+      contact: newLeadForm.contact.trim() || 'N/A',
+      stage: newLeadForm.stage as ElsxLead['stage'],
+      revenue: newLeadForm.revenue ? `₹${parseFloat(newLeadForm.revenue).toLocaleString('en-IN')}` : '₹0',
+    };
+    setElsxLeads(prev => [newLead, ...prev]);
+    setNewLeadForm({ name: '', contact: '', stage: 'New', revenue: '' });
+    setShowNewLead(false);
+    setNewLeadSaving(false);
+    addSystemEvent(`CRM: New lead "${newLead.name}" added to pipeline`, 'enterprise');
+    logSystem('kernel', 'info', `ELSX CRM: Lead ${newLead.id} created — ${newLead.name}`);
+  }, [newLeadForm, newLeadSaving, logSystem]);
+
   // ─── Oracle AI Handler ─────────────────────────────────────────────────
 
+  // Phase 14: Oracle with Context Awareness
   const handleOracleSubmit = async () => {
     if (!oracleInput.trim() || oracleLoading) return;
     const userMsg = oracleInput.trim();
@@ -948,7 +1198,21 @@ export default function AethelisOS() {
 
     const { text: oracleReply, toolCall } = await generateOracleResponse(userMsg, oracleConfig);
 
-    let displayText = oracleReply;
+    // Context-Aware Enhancement: Inject OS state into response
+    let contextPrefix = '';
+    if (stats.cpu > 80) {
+      contextPrefix = 'I sense heavy computational load upon the mesh. ';
+    } else if (harvestActive) {
+      contextPrefix = 'The harvest is flowing through the circuits. ';
+    } else if (computeNodeActive) {
+      contextPrefix = 'The ELSX grid pulses with neural intensity. ';
+    } else if (stats.ram > 85) {
+      contextPrefix = 'Memory channels are saturated. ';
+    } else if (!daemonConnected) {
+      contextPrefix = 'Note: The local daemon is silent — I speak from cached wisdom. ';
+    }
+
+    let displayText = contextPrefix + oracleReply;
     if (toolCall && toolCall.tool !== 'none') {
       const toolLabel = toolCall.tool === 'elsx_fetch_leads' ? 'ELSX Core'
         : toolCall.tool === 'wp_toggle_proxy' ? 'Omni-Market'
@@ -1344,21 +1608,41 @@ export default function AethelisOS() {
             </div>
           </div>
 
-          {/* Phase 11: Agentic Command Flow — auto-scrolling log */}
-          <div className="flex-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col min-h-[120px]">
+          {/* Phase 12: Agentic Command Flow — autonomous scheduler with toggle */}
+          <div className="flex-1 card-glass rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col min-h-[180px]">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                <span className="text-[9px] uppercase tracking-widest text-white/40">Agentic Command Flow</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${schedulerEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`}></span>
+                <span className="text-[9px] uppercase tracking-widest text-white/40">Autonomous Ledger</span>
               </div>
-              <span className="text-[8px] font-mono text-cyan-400/40">AUTO</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-[8px] font-mono px-2 py-0.5 rounded-full ${schedulerEnabled ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20' : 'text-white/40 bg-white/5'}`}>
+                  {schedulerEnabled ? 'ACTIVE' : 'STANDBY'}
+                </span>
+                <button
+                  onClick={toggleScheduler}
+                  className={`min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center p-2 rounded-lg transition-all duration-300 border
+                    ${schedulerEnabled
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300'
+                      : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/30 hover:border-cyan-500/50 active:scale-95'
+                    }`}
+                >
+                  {schedulerEnabled ? <StopCircle size={14} /> : <PlayCircle size={14} />}
+                </button>
+              </div>
             </div>
             <div ref={agenticLogRef} className="space-y-1 flex-1 overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
-              {agenticLogs.map((log, i) => (
-                <div key={i} className="text-[9px] sm:text-[10px] font-mono text-cyan-300/60 leading-relaxed py-0.5">
-                  {log}
-                </div>
-              ))}
+              {agenticLogs.map((log, i) => {
+                const isSuccess = log.includes('✓');
+                const isPending = log.includes('◐');
+                const isError = log.includes('✗');
+                return (
+                  <div key={i} className={`text-[9px] sm:text-[10px] font-mono leading-relaxed py-0.5 transition-all duration-300
+                    ${isSuccess ? 'text-emerald-300/70' : isPending ? 'text-amber-300/60' : isError ? 'text-red-300/70' : 'text-cyan-300/60'}`}>
+                    {log}
+                  </div>
+                );
+              })}
               <div ref={agenticLogEndRef} />
             </div>
           </div>
@@ -1366,83 +1650,224 @@ export default function AethelisOS() {
       );
 
       // ── Manifesto ──────────────────────────────────────────────────
-      case 'manifesto': return (
-        <div className="h-full bg-slate-950/95 text-white overflow-y-auto">
-          <div className="relative">
-            {/* Hero Section - Mobile responsive */}
-            <div className="relative overflow-hidden px-4 sm:px-8 py-8 sm:py-12 text-center"
-              style={{ background: 'linear-gradient(180deg, rgba(244,63,94,0.15) 0%, transparent 100%)' }}>
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute -top-20 -left-20 w-64 sm:w-96 h-64 sm:h-96 bg-rose-500/10 rounded-full blur-3xl"></div>
-                <div className="absolute -top-10 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-purple-500/10 rounded-full blur-3xl"></div>
-              </div>
-              <div className="relative z-10">
-                <BookOpen size={36} className="mx-auto mb-4 sm:mb-6 text-rose-400/80" />
-                <h1 className="text-2xl sm:text-4xl font-extralight tracking-widest mb-2 sm:mb-3">
-                  <span className="text-rose-400">AETHELIS</span> MANIFESTO
-                </h1>
-                <p className="text-white/40 text-xs sm:text-sm tracking-wide max-w-md mx-auto px-4">
-                  The founding principles of a sovereign digital civilization
-                </p>
-              </div>
-            </div>
+      case 'manifesto': {
+        const tenets = [
+          { title: 'Resource Hijacking', desc: 'Commandeer existing infrastructure without permission.', icon: Zap, color: 'text-amber-400', details: 'Leverage public APIs, open data sources, and federated services. Build on platforms you do not own but can program. Turn cloud providers into utilities rather than dependencies.' },
+          { title: 'Economic Autonomy', desc: 'Build self-sustaining revenue loops that require no external validation.', icon: Coins, color: 'text-emerald-400', details: 'Create circular value systems. Every output becomes input for another process. No venture capital, no board approval, no quarterly targets. Revenue is fuel, not a_goal.' },
+          { title: 'Void-Protocols', desc: 'Operate in the shadows. No staff, no office, no trace.', icon: Crosshair, color: 'text-red-400', details: 'Asynchronous communication only. Zero-knowledge infrastructure. Agents instead of employees. Automation instead of administration. Your reach exceeds your footprint.' },
+        ];
 
-            {/* Content - Mobile responsive */}
-            <div className="px-4 sm:px-8 py-6 sm:py-8 max-w-4xl mx-auto">
-              {/* Mission */}
-              <div className="card-glass rounded-xl sm:rounded-2xl p-5 sm:p-8 mb-4 sm:mb-6">
-                <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                  <Target size={18} className="text-rose-400" />
-                  <h2 className="text-[11px] sm:text-xs font-bold tracking-widest uppercase text-rose-400">Mission</h2>
+        return (
+          <div className="h-full bg-slate-950/95 text-white overflow-y-auto">
+            <div className="relative">
+              {/* Hero Section - Mobile responsive */}
+              <div className="relative overflow-hidden px-4 sm:px-8 py-8 sm:py-12 text-center"
+                style={{ background: 'linear-gradient(180deg, rgba(244,63,94,0.15) 0%, transparent 100%)' }}>
+                <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                  <div className="absolute -top-20 -left-20 w-64 sm:w-96 h-64 sm:h-96 bg-rose-500/10 rounded-full blur-3xl animate-pulse"></div>
+                  <div className="absolute -top-10 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
                 </div>
-                <blockquote className="text-base sm:text-xl font-light leading-relaxed text-white/85 border-l-2 border-rose-500/50 pl-4 sm:pl-6">
-                  "Absolute Displacement. Rendering global giants obsolete through decentralized, solo-driven architecture."
-                </blockquote>
-              </div>
-
-              {/* Vision */}
-              <div className="card-glass rounded-xl sm:rounded-2xl p-5 sm:p-8 mb-4 sm:mb-6">
-                <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                  <Compass size={18} className="text-purple-400" />
-                  <h2 className="text-[11px] sm:text-xs font-bold tracking-widest uppercase text-purple-400">Vision</h2>
+                <div className="relative z-10">
+                  <div className="relative inline-block">
+                    <BookOpen size={36} className="mx-auto mb-4 sm:mb-6 text-rose-400/80" />
+                    <div className="absolute inset-0 animate-ping"><BookOpen size={36} className="mx-auto text-rose-400/20" /></div>
+                  </div>
+                  <h1 className="text-2xl sm:text-4xl font-extralight tracking-widest mb-2 sm:mb-3">
+                    <span className="text-rose-400">AETHELIS</span> MANIFESTO
+                  </h1>
+                  <p className="text-white/40 text-xs sm:text-sm tracking-wide max-w-md mx-auto px-4">
+                    The founding principles of a sovereign digital civilization
+                  </p>
                 </div>
-                <blockquote className="text-base sm:text-xl font-light leading-relaxed text-white/85 border-l-2 border-purple-500/50 pl-4 sm:pl-6">
-                  "The Zero-Staff Paradigm. Operating a planetary-scale empire using automated agentic workflows and dynamic hardware allocation."
-                </blockquote>
+
+                {/* Navigation Tabs */}
+                <div className="relative z-10 flex justify-center gap-2 mt-6">
+                  {[
+                    { id: 'principles' as const, label: 'Principles', icon: Target },
+                    { id: 'roadmap' as const, label: 'Roadmap', icon: Map },
+                    { id: 'covenant' as const, label: 'Covenant', icon: FileSignature },
+                  ].map(tab => (
+                    <button key={tab.id}
+                      onClick={() => setManifestoSection(tab.id)}
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-[10px] font-medium transition-all ${
+                        manifestoSection === tab.id
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : 'bg-white/[0.03] text-white/40 hover:text-white/70 border border-transparent'
+                      }`}
+                    >
+                      <tab.icon size={14} />
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Core Tenets - Stack on mobile */}
-              <div className="grid grid-cols-1 gap-3 sm:gap-4">
-                {[
-                  { title: 'Resource Hijacking', desc: 'Commandeer existing infrastructure without permission.', icon: Zap, color: 'text-amber-400' },
-                  { title: 'Economic Autonomy', desc: 'Build self-sustaining revenue loops that require no external validation.', icon: Coins, color: 'text-emerald-400' },
-                  { title: 'Void-Protocols', desc: 'Operate in the shadows. No staff, no office, no trace.', icon: Crosshair, color: 'text-red-400' },
-                ].map(tenet => {
-                  const TI = tenet.icon;
-                  return (
-                    <div key={tenet.title} className="card-glass rounded-lg sm:rounded-xl p-4 sm:p-5 active:border-white/20 transition-all">
-                      <div className="flex items-start gap-3">
-                        <TI size={20} className={`mt-0.5 ${tenet.color}`} />
-                        <div>
-                          <h3 className="text-sm font-semibold text-white/90 mb-1">{tenet.title}</h3>
-                          <p className="text-[10px] sm:text-[11px] text-white/50 leading-relaxed">{tenet.desc}</p>
-                        </div>
+              {/* Content - Mobile responsive */}
+              <div className="px-4 sm:px-8 py-6 sm:py-8 max-w-4xl mx-auto">
+                {manifestoSection === 'principles' && (
+                  <div className="space-y-4">
+                    {/* Mission */}
+                    <div className="card-glass rounded-xl sm:rounded-2xl p-5 sm:p-8 border border-rose-500/20 animate-in fade-in duration-300">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                        <Target size={18} className="text-rose-400" />
+                        <h2 className="text-[11px] sm:text-xs font-bold tracking-widest uppercase text-rose-400">Mission</h2>
                       </div>
+                      <blockquote className="text-base sm:text-xl font-light leading-relaxed text-white/85 border-l-2 border-rose-500/50 pl-4 sm:pl-6">
+                        "Absolute Displacement. Rendering global giants obsolete through decentralized, solo-driven architecture."
+                      </blockquote>
                     </div>
-                  );
-                })}
-              </div>
 
-              {/* Signature */}
-              <div className="mt-6 sm:mt-8 text-center">
-                <p className="text-[8px] sm:text-[9px] text-white/30 tracking-widest uppercase">
-                  Proprietorship: Evolution Sphere Pvt Ltd
-                </p>
+                    {/* Vision */}
+                    <div className="card-glass rounded-xl sm:rounded-2xl p-5 sm:p-8 border border-purple-500/20 animate-in fade-in duration-300">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                        <Compass size={18} className="text-purple-400" />
+                        <h2 className="text-[11px] sm:text-xs font-bold tracking-widest uppercase text-purple-400">Vision</h2>
+                      </div>
+                      <blockquote className="text-base sm:text-xl font-light leading-relaxed text-white/85 border-l-2 border-purple-500/50 pl-4 sm:pl-6">
+                        "The Zero-Staff Paradigm. Operating a planetary-scale empire using automated agentic workflows and dynamic hardware allocation."
+                      </blockquote>
+                    </div>
+
+                    {/* Core Tenets - Expandable */}
+                    <div className="space-y-2">
+                      <h3 className="text-[10px] uppercase tracking-widest text-white/30 mb-3">Core Tenets</h3>
+                      {tenets.map((tenet, idx) => {
+                        const TI = tenet.icon;
+                        const isExpanded = expandedTenet === tenet.title;
+                        return (
+                          <div key={tenet.title}
+                            className={`card-glass rounded-xl overflow-hidden transition-all duration-300 ${isExpanded ? 'border border-white/20' : 'border border-transparent hover:border-white/10'}`}
+                            style={{ animationDelay: `${idx * 100}ms` }}
+                          >
+                            <button
+                              onClick={() => setExpandedTenet(isExpanded ? null : tenet.title)}
+                              className="w-full p-4 sm:p-5 text-left"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-start gap-3">
+                                  <TI size={20} className={`mt-0.5 ${tenet.color} transition-transform ${isExpanded ? 'scale-110' : ''}`} />
+                                  <div>
+                                    <h3 className="text-sm font-semibold text-white/90">{tenet.title}</h3>
+                                    <p className="text-[10px] sm:text-[11px] text-white/50 leading-relaxed mt-0.5">{tenet.desc}</p>
+                                  </div>
+                                </div>
+                                <ChevronDown size={16} className={`text-white/30 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-0 animate-in slide-in-from-top duration-200">
+                                <div className="ml-8 pl-4 border-l border-white/10 text-[11px] text-white/60 leading-relaxed">
+                                  {tenet.details}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {manifestoSection === 'roadmap' && (
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    <h3 className="text-[10px] uppercase tracking-widest text-white/30">Ascension Path</h3>
+                    <div className="relative pl-6 sm:pl-8">
+                      {/* Vertical line */}
+                      <div className="absolute left-[7px] top-2 bottom-2 w-[2px] bg-gradient-to-b from-rose-500/50 via-purple-500/50 to-transparent" />
+
+                      {[
+                        { phase: 'Phase I', title: 'Foundation', desc: 'Establish core infrastructure. Deploy sovereign nodes. Initialize ledger.', status: 'completed', icon: CheckCircle },
+                        { phase: 'Phase II', title: 'Integration', desc: 'Connect ELSX bridges. Activate WordPress proxies. Launch agentic scheduler.', status: 'completed', icon: CheckCircle },
+                        { phase: 'Phase III', title: 'Expansion', desc: 'Scale to regional clusters. Implement Q-Bit neural networks. Open oracle memory.', status: 'active', icon: Activity },
+                        { phase: 'Phase IV', title: 'Dominion', desc: 'Full operational autonomy. Zero human intervention. Planetary reach achieved.', status: 'pending', icon: Circle },
+                      ].map((step, idx) => {
+                        const SI = step.icon;
+                        const colors = {
+                          completed: 'text-emerald-400 bg-emerald-500/20 border-emerald-500/40',
+                          active: 'text-amber-400 bg-amber-500/20 border-amber-500/40 animate-pulse',
+                          pending: 'text-white/20 bg-white/5 border-white/10',
+                        };
+                        return (
+                          <div key={step.phase} className="relative mb-4 last:mb-0" style={{ animationDelay: `${idx * 150}ms` }}>
+                            {/* Node */}
+                            <div className={`absolute -left-6 sm:-left-8 top-1 w-4 h-4 rounded-full border-2 ${colors[step.status]} flex items-center justify-center`}>
+                              <SI size={8} />
+                            </div>
+                            <div className={`card-glass rounded-xl p-4 ${step.status === 'active' ? 'border border-amber-500/30' : ''}`}>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-[8px] uppercase tracking-wider text-white/30">{step.phase}</span>
+                                {step.status === 'active' && <span className="text-[7px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold uppercase">Live</span>}
+                              </div>
+                              <h4 className="text-sm font-semibold text-white/85">{step.title}</h4>
+                              <p className="text-[10px] text-white/40 mt-1">{step.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {manifestoSection === 'covenant' && (
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    <div className="card-glass rounded-2xl p-6 sm:p-8 text-center border border-rose-500/20">
+                      <FileSignature size={32} className="mx-auto mb-4 text-rose-400/60" />
+                      <h3 className="text-lg font-light text-white/80 mb-3">The Sovereign Covenant</h3>
+                      <p className="text-[11px] text-white/50 leading-relaxed mb-6">
+                        By clicking below, you pledge allegiance to the Aethelis paradigm. You commit to building
+                        sovereignty over dependence, automation over administration, and silence over noise.
+                        This covenant is binding only in spirit.
+                      </p>
+
+                      <div className="flex flex-wrap justify-center gap-2 mb-6">
+                        {['Sovereignty', 'Autonomy', 'Silence', 'Power'].map(value => (
+                          <span key={value} className="px-3 py-1.5 rounded-lg bg-white/[0.05] text-[10px] text-white/60 border border-white/10">
+                            {value}
+                          </span>
+                        ))}
+                      </div>
+
+                      <button
+                        onClick={() => { setSignedCovenant(true); addSystemEvent('Covenant signed — allegiance pledged to Aethelis', 'kernel'); }}
+                        disabled={signedCovenant}
+                        className={`w-full max-w-xs mx-auto py-3 rounded-xl font-semibold text-sm transition-all ${
+                          signedCovenant
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                            : 'bg-rose-500/80 hover:bg-rose-500 text-white active:scale-[0.98]'
+                        }`}
+                      >
+                        {signedCovenant ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <CheckCircle size={16} /> Covenant Signed
+                          </span>
+                        ) : (
+                          'Pledge Allegiance'
+                        )}
+                      </button>
+
+                      {signedCovenant && (
+                        <p className="text-[9px] text-white/30 mt-4 animate-in fade-in">
+                          Welcome to Aethelis. Your commitment has been logged.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Signature */}
+                <div className="mt-6 sm:mt-8 text-center">
+                  <p className="text-[8px] sm:text-[9px] text-white/30 tracking-widest uppercase">
+                    Proprietorship: Evolution Sphere Pvt Ltd
+                  </p>
+                  <p className="text-[7px] text-white/20 mt-1">
+                    All rights reserved. All systems operational.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      );
+        );
+      }
 
       // ── Oracle (Q-Bit Core) ──────────────────────────────────────────────────
       case 'oracle': return (
@@ -1573,7 +1998,20 @@ export default function AethelisOS() {
                       <span className="text-[8px] sm:text-[9px] font-semibold text-purple-400 uppercase tracking-wider">Oracle</span>
                     </div>
                   )}
-                  <p className="text-[11px] sm:text-[11px] leading-relaxed text-white/85">{msg.text}</p>
+                  <div className="text-[11px] sm:text-[11px] leading-relaxed text-white/85 whitespace-pre-wrap">
+                    {msg.text.split('\n').map((line, li) => (
+                      <div key={li} className={li > 0 ? 'mt-1' : ''}>
+                        {line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, pi) => {
+                          if (part.startsWith('**') && part.endsWith('**')) {
+                            return <strong key={pi} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
+                          } else if (part.startsWith('`') && part.endsWith('`')) {
+                            return <code key={pi} className="bg-white/10 px-1.5 py-0.5 rounded text-purple-300 font-mono text-[10px]">{part.slice(1, -1)}</code>;
+                          }
+                          return <span key={pi}>{part}</span>;
+                        })}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
@@ -1593,6 +2031,30 @@ export default function AethelisOS() {
             )}
             <div ref={oracleEndRef} />
           </div>
+
+          {/* Quick Prompts - Show when input is empty and not loading */}
+          {!oracleInput.trim() && !oracleLoading && !oraclePrompted && oracleMessages.length === 0 && (
+            <div className="shrink-0 px-3 sm:px-4 pb-2">
+              <p className="text-[8px] uppercase tracking-wider text-white/25 mb-2">Quick Prompts</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'System Status', icon: Activity },
+                  { label: 'Analyze Network', icon: Network },
+                  { label: 'Show Leads', icon: Users },
+                  { label: 'Vault Status', icon: Shield },
+                  { label: 'Recent Events', icon: Zap },
+                ].map(preset => (
+                  <button key={preset.label}
+                    onClick={() => { setOracleInput(preset.label); setOraclePrompted(true); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/[0.06] hover:bg-purple-500/20 border border-white/[0.08] hover:border-purple-500/30 text-[10px] text-white/60 hover:text-white/90 transition-all"
+                  >
+                    <preset.icon size={12} className="text-purple-400/60" />
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Input - Touch friendly */}
           <div className="shrink-0 p-3 sm:p-4 border-t border-white/[0.07]">
@@ -1713,34 +2175,148 @@ export default function AethelisOS() {
 
               {enterpriseTab === 'CRM' && (
                 <div className="space-y-3">
+                  {/* Pipeline Stage Summary */}
+                  <div className="grid grid-cols-5 gap-2">
+                    {(['New','Qualified','Proposal','Won','Lost'] as const).map(stage => {
+                      const count = elsxLeads.filter(l => l.stage === stage).length;
+                      const colors: Record<string, string> = { New: 'text-white/50', Qualified: 'text-sky-400', Proposal: 'text-amber-400', Won: 'text-emerald-400', Lost: 'text-red-400' };
+                      return (
+                        <div key={stage} className="card-glass rounded-xl p-2 text-center cursor-pointer hover:border-violet-500/20 transition-all"
+                          onClick={() => setElsxSortKey('stage')}>
+                          <p className={`text-lg font-mono font-light ${colors[stage]}`}>{count}</p>
+                          <p className="text-[7px] uppercase tracking-wider text-white/25">{stage}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* New Lead Form */}
+                  {showNewLead && (
+                    <div className="card-glass rounded-2xl p-4 border border-violet-500/30 space-y-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-semibold text-violet-300 uppercase tracking-wider">New Lead</span>
+                        <button onClick={() => setShowNewLead(false)} className="text-white/30 hover:text-white/60 transition-colors"><X size={14}/></button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input placeholder="Full Name *" value={newLeadForm.name}
+                          onChange={e => setNewLeadForm(p => ({ ...p, name: e.target.value }))}
+                          className="col-span-2 input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
+                        <input placeholder="Contact / Email" value={newLeadForm.contact}
+                          onChange={e => setNewLeadForm(p => ({ ...p, contact: e.target.value }))}
+                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
+                        <input placeholder="Revenue (₹)" type="number" value={newLeadForm.revenue}
+                          onChange={e => setNewLeadForm(p => ({ ...p, revenue: e.target.value }))}
+                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
+                        <select value={newLeadForm.stage}
+                          onChange={e => setNewLeadForm(p => ({ ...p, stage: e.target.value }))}
+                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 outline-none bg-transparent col-span-2">
+                          {['New','Qualified','Proposal','Won','Lost'].map(s => <option key={s} value={s} className="bg-slate-900">{s}</option>)}
+                        </select>
+                      </div>
+                      <button onClick={handleAddLead} disabled={!newLeadForm.name.trim() || newLeadSaving}
+                        className="w-full py-2.5 rounded-xl bg-violet-600/30 border border-violet-500/40 text-violet-200 text-[11px] font-semibold
+                          hover:bg-violet-600/50 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
+                        {newLeadSaving ? <><RefreshCw size={12} className="animate-spin"/>Adding Lead...</> : <><Plus size={12}/>Add to Pipeline</>}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Search + Sort row */}
+                  <div className="flex gap-2 items-center">
+                    <div className="relative flex-1">
+                      <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/>
+                      <input placeholder="Search leads..." value={elsxSearch}
+                        onChange={e => setElsxSearch(e.target.value)}
+                        className="w-full rounded-xl pl-9 pr-3 py-2 text-[10px] text-white/80 placeholder-white/30 outline-none input-glass" />
+                    </div>
+                    <button onClick={() => setElsxSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                      className="p-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-white/50 hover:text-white/80 transition-colors flex items-center justify-center">
+                      {elsxSortDir === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}
+                    </button>
+                  </div>
+
+                  {/* Sort keys */}
+                  <div className="text-[8px] uppercase tracking-wider text-white/25 flex gap-4 px-1">
+                    {(['name','stage','revenue'] as const).map(k => (
+                      <button key={k} onClick={() => setElsxSortKey(k)}
+                        className={`hover:text-white/50 transition-colors ${elsxSortKey === k ? 'text-violet-400' : ''}`}>{k}</button>
+                    ))}
+                  </div>
+
+                  {/* Lead list */}
                   {elsxLoading ? (
                     Array.from({ length: 4 }).map((_, i) => (
                       <div key={i} className="skeleton-glass h-16 flex items-center px-4">
                         <div className="w-9 h-9 rounded-full bg-white/5"></div>
-                        <div className="flex-1 ml-4 space-y-1.5">
-                          <div className="h-2 w-24 bg-white/5 rounded"></div>
-                          <div className="h-1.5 w-16 bg-white/5 rounded"></div>
-                        </div>
+                        <div className="flex-1 ml-4 space-y-1.5"><div className="h-2 w-24 bg-white/5 rounded"></div><div className="h-1.5 w-16 bg-white/5 rounded"></div></div>
                       </div>
                     ))
-                  ) : elsxLeads.map(lead => (
-                    <div key={lead.id} className="card-glass rounded-2xl p-4 flex items-center gap-4 cursor-pointer">
-                      <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center text-violet-400 text-[10px] font-bold shrink-0">
-                        {lead.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-white/80">{lead.name}</p>
-                        <p className="text-[9px] text-white/35">{lead.id} · {lead.contact}</p>
-                      </div>
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                        lead.stage === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                        : lead.stage === 'Proposal' || lead.stage === 'Qualified' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-                        : 'text-white/25 bg-white/[0.03] border-white/[0.06]'
-                      }`}>{lead.stage}</span>
-                      <span className="text-[10px] font-mono text-emerald-400">{lead.revenue}</span>
-                      <ChevronRight size={12} className="text-white/20" />
+                  ) : (
+                    elsxLeads
+                      .filter(l => !elsxSearch || [l.name, l.id, l.contact].some(v => v.toLowerCase().includes(elsxSearch.toLowerCase())))
+                      .sort((a, b) => {
+                        if (!elsxSortKey) return 0;
+                        if (elsxSortKey === 'revenue') {
+                          return elsxSortDir === 'asc'
+                            ? parseFloat(a.revenue.replace(/[^\d.]/g,'')) - parseFloat(b.revenue.replace(/[^\d.]/g,''))
+                            : parseFloat(b.revenue.replace(/[^\d.]/g,'')) - parseFloat(a.revenue.replace(/[^\d.]/g,''));
+                        }
+                        return elsxSortDir === 'asc' ? a[elsxSortKey].localeCompare(b[elsxSortKey]) : b[elsxSortKey].localeCompare(a[elsxSortKey]);
+                      })
+                      .map(lead => {
+                        const isSelected = selectedLeadId === lead.id;
+                        const stageCls = lead.stage === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                          : lead.stage === 'Lost' ? 'text-red-400 bg-red-500/10 border-red-500/20'
+                          : lead.stage === 'Proposal' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                          : lead.stage === 'Qualified' ? 'text-sky-400 bg-sky-500/10 border-sky-500/20'
+                          : 'text-white/30 bg-white/[0.03] border-white/[0.06]';
+                        return (
+                          <div key={lead.id}>
+                            <div onClick={() => setSelectedLeadId(isSelected ? null : lead.id)}
+                              className={`card-glass rounded-2xl p-4 flex items-center gap-3 cursor-pointer transition-all duration-200
+                                ${isSelected ? 'border-violet-500/30 bg-violet-500/5' : 'hover:border-violet-500/20'}`}>
+                              <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center text-violet-400 text-[10px] font-bold shrink-0">
+                                {lead.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] font-medium text-white/80">{lead.name}</p>
+                                <p className="text-[9px] text-white/35 truncate">{lead.id} · {lead.contact}</p>
+                              </div>
+                              <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${stageCls}`}>{lead.stage}</span>
+                              <span className="text-[10px] font-mono text-emerald-400 shrink-0">{lead.revenue}</span>
+                              <ChevronRight size={12} className={`text-white/20 transition-transform ${isSelected ? 'rotate-90' : ''}`} />
+                            </div>
+                            {/* Expanded detail */}
+                            {isSelected && (
+                              <div className="mx-2 mb-2 card-glass rounded-b-2xl p-3 border border-t-0 border-violet-500/20 bg-violet-500/5">
+                                <div className="grid grid-cols-2 gap-3 mb-3 text-[9px]">
+                                  <div><p className="text-white/30 mb-0.5">ID</p><p className="font-mono text-violet-300">{lead.id}</p></div>
+                                  <div><p className="text-white/30 mb-0.5">Contact</p><p className="text-white/60">{lead.contact}</p></div>
+                                  <div><p className="text-white/30 mb-0.5">Revenue</p><p className="text-emerald-400 font-mono">{lead.revenue}</p></div>
+                                  <div><p className="text-white/30 mb-0.5">Stage</p><p className={`font-semibold ${stageCls.split(' ')[0]}`}>{lead.stage}</p></div>
+                                </div>
+                                <div className="flex gap-2">
+                                  {(['New','Qualified','Proposal','Won','Lost'] as const).filter(s => s !== lead.stage).map(s => (
+                                    <button key={s} onClick={() => setElsxLeads(prev => prev.map(l => l.id === lead.id ? { ...l, stage: s } : l))}
+                                      className="flex-1 py-1.5 rounded-lg text-[8px] font-semibold border border-white/10 text-white/40 hover:border-violet-500/30 hover:text-violet-300 transition-all">
+                                      → {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
+
+                  {elsxLeads.length === 0 && !elsxLoading && (
+                    <div className="flex flex-col items-center justify-center py-10 text-white/20">
+                      <Users size={28} className="mb-2 opacity-30" />
+                      <p className="text-[10px]">No leads in pipeline</p>
+                      <button onClick={() => setShowNewLead(true)} className="mt-3 text-[9px] text-violet-400 hover:text-violet-300 transition-colors">+ Add first lead</button>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
 
@@ -1862,20 +2438,44 @@ export default function AethelisOS() {
               <h2 className="text-2xl font-light">Omni-Market</h2>
               <p className="text-white/30 text-[10px] mt-0.5">Deploy sovereign functionalities into your planetary OS.</p>
             </div>
+
+            {/* Deployment Progress Modal */}
+            {deployingModule && (
+              <div className="mb-4 card-glass rounded-2xl p-4 border border-emerald-500/30">
+                <div className="flex items-center gap-2 mb-3">
+                  <RefreshCw size={12} className="animate-spin text-emerald-400"/>
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-400">Deploying Module...</span>
+                  <span className="ml-auto text-[9px] font-mono text-white/40">{deployProgress.toFixed(0)}%</span>
+                </div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mb-3">
+                  <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300"
+                    style={{ width: `${deployProgress}%` }} />
+                </div>
+                <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                  {deployLogs.map((log, i) => (
+                    <div key={i} className="text-[8px] font-mono text-white/50">{log}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {dbLoading ? <p className="text-white/20 text-[10px] col-span-2">Loading modules…</p> : modules.map(mod => {
                 const meta = META[mod.module_name] ?? { desc: '', icon: Server, c: 'text-white/40', bg: 'bg-white/[0.05]' };
                 const MI = meta.icon;
+                const isDeploying = deployingModule === mod.id;
                 return (
-                  <div key={mod.id} className="bg-white/[0.04] border border-white/[0.07] p-4 rounded-2xl flex items-center gap-4 hover:border-white/15 transition-all">
+                  <div key={mod.id} className={`bg-white/[0.04] border p-4 rounded-2xl flex items-center gap-4 transition-all duration-300 ${isDeploying ? 'border-emerald-500/40' : 'border-white/[0.07] hover:border-white/15'}`}>
                     <div className={`w-11 h-11 rounded-xl ${meta.bg} flex items-center justify-center ${meta.c} shrink-0`}><MI size={20}/></div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-xs text-white/85">{mod.module_name}</h4>
                       <p className="text-[9px] text-white/30 mt-0.5 mb-2">{meta.desc}</p>
-                      <button onClick={() => toggleModule(mod)}
-                        className={`px-3 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 transition-all border
-                          ${mod.installed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20' : 'bg-white/[0.06] hover:bg-white/[0.12] text-white/55 border-white/[0.06]'}`}>
-                        {mod.installed ? <><CheckCircle size={9}/> Installed</> : <><ArrowUpRight size={9}/> Deploy</>}
+                      <button onClick={() => toggleModule(mod)} disabled={isDeploying}
+                        className={`px-3 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 transition-all duration-300 border active:scale-95
+                          ${mod.installed
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20'
+                            : 'bg-white/[0.06] hover:bg-white/[0.12] text-white/55 border-white/[0.06] hover:border-emerald-500/30'}`}>
+                        {isDeploying ? <><RefreshCw size={9} className="animate-spin"/>Deploying...</> : mod.installed ? <><CheckCircle size={9}/> Integrated</> : <><ArrowUpRight size={9}/> Deploy</>}
                       </button>
                     </div>
                     {mod.installed_at && <span className="text-[8px] text-white/20 shrink-0">{new Date(mod.installed_at).toLocaleDateString()}</span>}
@@ -1941,10 +2541,10 @@ export default function AethelisOS() {
       case 'ledger': {
         const totalIn  = ledger.filter(t=>t.direction==='in').reduce((a,b)=>a+Number(b.amount),0);
         const totalOut = ledger.filter(t=>t.direction==='out').reduce((a,b)=>a+Number(b.amount),0);
-        const chartData = ledger.slice(0, 12).reverse().map(t => Math.abs(Number(t.amount)));
+        const priceChange = ((athCurrentPrice - athPriceHistory[0]) / athPriceHistory[0] * 100);
         return (
           <div className="h-full flex flex-col bg-slate-950/95 text-white overflow-hidden">
-            {/* Hero Stats - Mobile responsive */}
+            {/* Hero Stats with Live Price */}
             <div className="relative px-4 sm:px-6 py-5 sm:py-6 overflow-hidden shrink-0"
               style={{ background: 'linear-gradient(180deg, rgba(245,158,11,0.1) 0%, transparent 100%)' }}>
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1954,49 +2554,73 @@ export default function AethelisOS() {
                 <div className="flex items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2">
                   <Coins size={16} className="text-amber-400 sm:text-[18px]" />
                   <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-amber-400/70">Sovereign Treasury</span>
+                  <span className="text-[8px] ml-auto px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 animate-pulse">LIVE</span>
                 </div>
                 <div className="flex items-end gap-2 sm:gap-3">
-                  <span className="text-3xl sm:text-5xl font-extralight font-mono text-white">
-                    {athLive ? athLive.balance.toLocaleString(undefined, { maximumFractionDigits: 2 }) : (sovereignAssets ? Number(sovereignAssets.ath_balance).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (totalIn - totalOut).toLocaleString(undefined, { maximumFractionDigits: 2 }))}
+                  <span className="text-3xl sm:text-5xl font-extralight font-mono text-white data-value">
+                    {athCurrentPrice.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}
                   </span>
                   <span className="text-base sm:text-xl font-light text-amber-400/80 mb-0.5 sm:mb-2">ATH</span>
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-white/35 mt-1 flex items-center gap-1">
-                  <TrendingUp size={11} className={athLive && athLive.change24h >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-                  {athLive ? `${athLive.change24h >= 0 ? '+' : ''}${athLive.change24h.toFixed(2)}% from last epoch` : (sovereignAssets ? `${sovereignAssets.nft_count} active NFT assets` : '+23.4% from last epoch')}
+                  <TrendingUp size={11} className={priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+                  <span className={priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}% epoch change
+                  </span>
                 </p>
               </div>
             </div>
 
-            {/* Quick Stats Row - 2x2 on mobile, 4 columns on desktop */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 px-4 sm:px-6 pb-4 sm:pb-5 shrink-0">
+            {/* Live Pricing Chart - GlowLineChart */}
+            <div className="px-4 sm:px-6 pb-4 shrink-0">
+              <div className="card-glass rounded-lg sm:rounded-2xl p-3 sm:p-4 h-32 sm:h-36">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-amber-400/60">ATH/USD Live Ticker</span>
+                  <span className="text-[8px] font-mono text-white/40">60s Window</span>
+                </div>
+                <GlowLineChart data={athPriceHistory} color="#f59e0b" h={50} showGrid />
+              </div>
+            </div>
+
+            {/* Quick Stats Row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 px-4 sm:px-6 pb-4 shrink-0">
               {[
-                { label: '24h Volume', value: '+4,892', color: 'text-emerald-400' },
+                { label: 'NFTs Minted', value: nftAssets.length.toString(), color: 'text-amber-400' },
                 { label: 'Gas Fee', value: '0.0032', color: 'text-white/70' },
                 { label: 'Block', value: '#19,847', color: 'text-white/70' },
                 { label: 'Validators', value: '1,402', color: 'text-sky-400' },
               ].map(s => (
-                <div key={s.label} className="card-glass rounded-lg sm:rounded-xl p-2.5 sm:p-3 text-center">
+                <div key={s.label} className="card-glass rounded-lg sm:rounded-xl p-2.5 sm:p-3 text-center transition-all duration-300 hover:border-amber-500/30">
                   <p className="text-[7px] sm:text-[8px] uppercase text-white/40 mb-0.5 sm:mb-1">{s.label}</p>
                   <p className={`text-sm sm:text-lg font-mono ${s.color}`}>{s.value}</p>
                 </div>
               ))}
             </div>
 
-            {/* Chart Area - Hide on very small screens or simplify */}
-            <div className="px-4 sm:px-6 pb-4 sm:pb-5 shrink-0 hidden sm:block">
-              <div className="card-glass rounded-lg sm:rounded-2xl p-3 sm:p-4 h-28 sm:h-32">
-                <div className="flex justify-between items-center mb-1.5 sm:mb-2">
-                  <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-white/40">Portfolio Performance</span>
-                  <div className="flex gap-1 sm:gap-2">
-                    {['1H','1D','1W'].map(p => (
-                      <button key={p} className="text-[7px] sm:text-[8px] text-white/40 active:text-white px-1.5 sm:px-2 py-0.5 rounded bg-white/5">{p}</button>
-                    ))}
-                  </div>
-                </div>
-                <Sparkline data={chartData.length > 0 ? chartData : [100,150,120,180,160,200,180,220,250,280]} color="#f59e0b" h={40} />
-              </div>
+            {/* Mint NFT Button */}
+            <div className="px-4 sm:px-6 pb-3 shrink-0">
+              <button onClick={handleMintNft}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs tracking-wide transition-all duration-300 border
+                  bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/30 hover:border-amber-500/50 active:scale-[0.98]
+                  shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)]">
+                <Plus size={14} />
+                Mint Algorithmic NFT
+              </button>
             </div>
+
+            {/* NFT Assets */}
+            {nftAssets.length > 0 && (
+              <div className="px-4 sm:px-6 pb-3 shrink-0">
+                <p className="text-[8px] uppercase tracking-widest text-amber-400/50 mb-2">Minted Assets</p>
+                <div className="flex flex-wrap gap-2">
+                  {nftAssets.slice(-4).map(nft => (
+                    <div key={nft.id} className="card-glass rounded-lg px-3 py-2 text-[9px] border border-amber-500/20">
+                      <span className="text-amber-400">{nft.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="px-4 sm:px-6 pb-3 sm:pb-4 flex justify-between items-center shrink-0">
@@ -2339,22 +2963,30 @@ export default function AethelisOS() {
               </div>
             )}
 
-            {/* Secure notes grid */}
+            {/* Secure notes grid with modal view/edit */}
             <div className="flex-1 overflow-y-auto space-y-2">
               {secureNotes.length > 0 && (
                 <>
                   <p className="text-[8px] uppercase tracking-widest text-violet-400/50 font-mono px-1">Encrypted Local Notes</p>
                   {secureNotes.map(note => (
-                    <div key={note.id} className="card-glass rounded-xl p-3 flex flex-col gap-1.5 group cursor-default">
+                    <div key={note.id}
+                      onClick={() => { setVaultEditNote(note); setVaultEditContent(note.content || ''); }}
+                      className="card-glass rounded-xl p-3 flex flex-col gap-1.5 group cursor-pointer transition-all duration-300 hover:border-violet-500/30 hover:scale-[1.01]">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Lock size={10} className="text-violet-400/60"/>
                           <span className="text-[10px] font-mono text-white/70">{note.title}</span>
                         </div>
-                        <button onClick={() => handleDeleteNote(note.id)}
-                          className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 transition-all p-1">
-                          <Trash2 size={11}/>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button onClick={e => { e.stopPropagation(); setVaultEditNote(note); setVaultEditContent(note.content || ''); }}
+                            className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-violet-400 transition-all p-1">
+                            <Eye size={11}/>
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); handleDeleteNote(note.id); }}
+                            className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 transition-all p-1">
+                            <Trash2 size={11}/>
+                          </button>
+                        </div>
                       </div>
                       {note.content && (
                         <p className="text-[9px] text-white/40 leading-relaxed line-clamp-2 font-mono">{note.content}</p>
@@ -2365,13 +2997,63 @@ export default function AethelisOS() {
                 </>
               )}
 
+              {/* Modal for viewing/editing notes */}
+              {vaultEditNote && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setVaultEditNote(null)}>
+                  <div className="card-glass rounded-2xl p-5 max-w-lg w-full border border-violet-500/30 shadow-[0_0_40px_rgba(139,92,246,0.2)]" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Lock size={14} className="text-violet-400"/>
+                        <span className="text-sm font-semibold text-white/80">{vaultEditNote.title}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[8px] text-white/30 font-mono">{vaultEditNote.id}</span>
+                        <button onClick={() => setVaultEditNote(null)} className="text-white/30 hover:text-white transition-colors p-1">
+                          <X size={14}/>
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      value={vaultEditContent}
+                      onChange={e => setVaultEditContent(e.target.value)}
+                      rows={8}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[11px] text-white/70 placeholder-white/20 outline-none focus:border-violet-500/40 transition-colors resize-none font-mono"
+                      placeholder="Note content..."
+                    />
+                    <div className="flex justify-between items-center mt-4">
+                      <p className="text-[8px] text-white/25">Encrypted with AES-256-GCM · Modified {new Date(vaultEditNote.updatedAt).toLocaleString()}</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => setVaultEditNote(null)}
+                          className="text-[9px] text-white/40 hover:text-white/60 px-3 py-1.5 rounded-lg transition-colors border border-white/10">
+                          Cancel
+                        </button>
+                        <button onClick={async () => {
+                          setVaultEditSaving(true);
+                          await deleteNote(vaultEditNote.id);
+                          await saveNote(vaultEditNote.title, vaultEditContent);
+                          const notes = await listNotes();
+                          setSecureNotes(notes);
+                          setVaultEditNote(null);
+                          setVaultEditSaving(false);
+                          logSystem('vault', 'sys', 'Secure note updated and re-encrypted.');
+                        }} disabled={vaultEditSaving}
+                          className="flex items-center gap-1.5 bg-violet-600/30 border border-violet-500/40 text-violet-200 px-3 py-1.5 rounded-lg text-[9px] font-semibold hover:bg-violet-600/40 transition-colors disabled:opacity-50">
+                          {vaultEditSaving ? <RefreshCw size={10} className="animate-spin"/> : <Lock size={10}/>}
+                          {vaultEditSaving ? 'Re-encrypting...' : 'Save & Re-encrypt'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Daemon files (legacy Phase 9) */}
               {vaultFiles.length > 0 && (
                 <>
                   <p className="text-[8px] uppercase tracking-widest text-white/30 font-mono px-1 pt-2">Daemon Files</p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 content-start">
                     {vaultFiles.map(doc => (
-                      <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group ${doc.encrypted ? 'opacity-60' : ''}`}>
+                      <div key={doc.id} className={`card-glass rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer group transition-all duration-300 hover:border-violet-500/30 ${doc.encrypted ? 'opacity-60' : ''}`}>
                         <div className="relative">
                           <FileText size={24} className="text-white/30 group-hover:text-violet-400 transition-colors" />
                           {doc.encrypted && <Lock size={10} className="absolute -bottom-1 -right-1 text-amber-400" />}
@@ -2451,95 +3133,211 @@ export default function AethelisOS() {
 
       // ── Files ─────────────────────────────────────────────────────
       case 'files': {
-        const fileSystem: Record<string, Array<{ name: string; type: 'folder' | 'file'; size?: string; icon: React.ElementType }>> = {
+        const localFileTree: Record<string, Array<{ name: string; type: 'folder' | 'file'; size?: string; icon: React.ElementType; modified?: string }>> = {
           '/home': [
-            { name: 'Documents', type: 'folder', icon: Folder },
-            { name: 'Downloads', type: 'folder', icon: Download },
-            { name: 'Pictures', type: 'folder', icon: Image },
-            { name: 'Music', type: 'folder', icon: Music },
-            { name: 'Videos', type: 'folder', icon: Video },
-            { name: 'Projects', type: 'folder', icon: Folder },
-            { name: '.config', type: 'folder', icon: Settings },
-            { name: 'readme.txt', type: 'file', size: '2KB', icon: File },
+            { name: 'Documents', type: 'folder', icon: Folder, modified: '2026-07-01' },
+            { name: 'Downloads', type: 'folder', icon: Download, modified: '2026-06-29' },
+            { name: 'Pictures', type: 'folder', icon: Image, modified: '2026-06-28' },
+            { name: 'Music', type: 'folder', icon: Music, modified: '2026-06-15' },
+            { name: 'Videos', type: 'folder', icon: Video, modified: '2026-06-10' },
+            { name: 'Projects', type: 'folder', icon: Folder, modified: '2026-07-02' },
+            { name: 'readme.txt', type: 'file', size: '2 KB', icon: File, modified: '2026-07-01' },
           ],
           '/home/Documents': [
-            { name: 'Reports', type: 'folder', icon: Folder },
-            { name: 'Contracts', type: 'folder', icon: Folder },
-            { name: 'Notes', type: 'folder', icon: Folder },
-            { name: 'quarterly_analysis.pdf', type: 'file', size: '1.4MB', icon: FileText },
-            { name: 'meeting_notes.md', type: 'file', size: '8KB', icon: File },
+            { name: 'Reports', type: 'folder', icon: Folder, modified: '2026-07-01' },
+            { name: 'Contracts', type: 'folder', icon: Folder, modified: '2026-06-20' },
+            { name: 'quarterly_analysis.pdf', type: 'file', size: '1.4 MB', icon: FileText, modified: '2026-07-01' },
+            { name: 'meeting_notes.md', type: 'file', size: '8 KB', icon: File, modified: '2026-06-30' },
           ],
           '/home/Downloads': [
-            { name: 'installer_v2.pkg', type: 'file', size: '45MB', icon: Download },
-            { name: 'assets.zip', type: 'file', size: '128MB', icon: File },
-            { name: 'screenshot.png', type: 'file', size: '2.3MB', icon: Image },
+            { name: 'installer_v2.pkg', type: 'file', size: '45 MB', icon: Download, modified: '2026-06-29' },
+            { name: 'assets.zip', type: 'file', size: '128 MB', icon: File, modified: '2026-06-28' },
+            { name: 'screenshot.png', type: 'file', size: '2.3 MB', icon: Image, modified: '2026-06-27' },
           ],
           '/home/Pictures': [
-            { name: 'Screenshots', type: 'folder', icon: Folder },
-            { name: 'Wallpapers', type: 'folder', icon: Folder },
-            { name: 'vacation.jpg', type: 'file', size: '4.2MB', icon: Image },
+            { name: 'Screenshots', type: 'folder', icon: Folder, modified: '2026-06-28' },
+            { name: 'Wallpapers', type: 'folder', icon: Folder, modified: '2026-06-01' },
           ],
           '/home/Music': [
-            { name: 'Playlists', type: 'folder', icon: Folder },
-            { name: 'ambient_mix.mp3', type: 'file', size: '12MB', icon: Music },
+            { name: 'ambient_mix.mp3', type: 'file', size: '12 MB', icon: Music, modified: '2026-06-15' },
           ],
           '/home/Videos': [
-            { name: 'Recordings', type: 'folder', icon: Folder },
-            { name: 'demo_clip.mp4', type: 'file', size: '89MB', icon: Video },
+            { name: 'demo_clip.mp4', type: 'file', size: '89 MB', icon: Video, modified: '2026-06-10' },
+          ],
+          '/home/Projects': [
+            { name: 'aethelis-os', type: 'folder', icon: Folder, modified: '2026-07-02' },
+            { name: 'elsx-bridge', type: 'folder', icon: Folder, modified: '2026-06-30' },
           ],
         };
-        const currentFiles = fileSystem[currentPath] || [];
+
+        const vaultFileTypeIcon = (type: string): React.ElementType => {
+          switch (type) {
+            case 'Key': return Lock;
+            case 'Contract': return FileText;
+            case 'Genetic': return Database;
+            case 'Protocol': return Shield;
+            case 'Image': return Image;
+            case 'Video': return Video;
+            default: return File;
+          }
+        };
+
+        const currentFiles = localFileTree[currentPath] || [];
         const pathParts = currentPath.split('/').filter(Boolean);
+        const sidebarItems = [
+          { label: 'Local Files', key: 'local' as const, icon: HardDrive },
+          { label: 'Sovereign Vault', key: 'vault' as const, icon: Lock },
+        ];
+
         return (
-          <div className="h-full flex flex-col bg-slate-950/92 text-white">
-            <div className="flex items-center justify-between p-3 border-b border-white/[0.07] shrink-0">
-              <div className="flex items-center gap-2">
-                <button onClick={() => setCurrentPath('/home')} className="text-white/40 hover:text-white transition-colors">
-                  <Folder size={16} />
-                </button>
-                <div className="flex items-center text-[10px] text-white/50">
-                  {pathParts.map((part, i) => (
-                    <span key={i} className="flex items-center">
-                      <span className="hover:text-white cursor-pointer" onClick={() => setCurrentPath('/' + pathParts.slice(0, i + 1).join('/'))}>{part}</span>
-                      {i < pathParts.length - 1 && <span className="mx-1 text-white/20">/</span>}
-                    </span>
-                  ))}
-                </div>
+          <div className="h-full flex bg-slate-950/92 text-white">
+            {/* Sidebar */}
+            <div className="w-36 sm:w-44 bg-white/[0.02] border-r border-white/[0.07] flex flex-col shrink-0">
+              <div className="p-3 border-b border-white/[0.05]">
+                <p className="text-[8px] uppercase tracking-widest text-white/25">Location</p>
               </div>
-              <div className="flex items-center gap-2">
-                <button className="p-1.5 rounded-lg bg-white/[0.06] hover:bg-white/10 text-white/50 hover:text-white transition-all">
-                  <Upload size={14} />
-                </button>
-                <button className="p-1.5 rounded-lg bg-white/[0.06] hover:bg-white/10 text-white/50 hover:text-white transition-all">
-                  <FolderPlus size={14} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {currentFiles.map(file => {
-                  const FI = file.icon;
-                  const isFolder = file.type === 'folder';
+              <div className="p-2 space-y-0.5">
+                {sidebarItems.map(item => {
+                  const SI = item.icon;
                   return (
-                    <div
-                      key={file.name}
-                      className={`card-glass rounded-xl p-3 flex flex-col items-center gap-2 cursor-pointer transition-all ${selectedFile === file.name ? 'border-sky-500/30' : ''}`}
-                      onClick={() => setSelectedFile(file.name)}
-                      onDoubleClick={() => isFolder && setCurrentPath(`${currentPath}/${file.name}`)}
-                    >
-                      <FI size={28} className={isFolder ? 'text-amber-400' : 'text-white/50'} />
-                      <span className="text-[9px] text-white/70 text-center truncate w-full">{file.name}</span>
-                      {file.size && <span className="text-[8px] text-white/30">{file.size}</span>}
-                    </div>
+                    <button key={item.key} onClick={() => { setFilesSection(item.key); if (item.key === 'local') setCurrentPath('/home'); }}
+                      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-[10px] font-medium transition-all text-left
+                        ${filesSection === item.key ? 'bg-blue-500/15 text-blue-300 border border-blue-500/20' : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'}`}>
+                      <SI size={12} className={filesSection === item.key ? 'text-blue-400' : 'text-white/25'} />
+                      {item.label}
+                    </button>
                   );
                 })}
               </div>
-              {currentFiles.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-48 text-white/30">
-                  <FolderOpen size={32} className="mb-2 opacity-30" />
-                  <span className="text-[10px]">Empty folder</span>
+              <div className="p-2 mt-2">
+                <p className="text-[8px] uppercase tracking-widest text-white/20 px-2.5 mb-1.5">Quick Access</p>
+                {[{ label: 'Documents', path: '/home/Documents' }, { label: 'Downloads', path: '/home/Downloads' }, { label: 'Projects', path: '/home/Projects' }].map(q => (
+                  <button key={q.label} onClick={() => { setFilesSection('local'); setCurrentPath(q.path); }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[9px] text-white/30 hover:text-white/60 hover:bg-white/[0.03] transition-all text-left">
+                    <Folder size={10} className="text-amber-400/50" /> {q.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Main content */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Toolbar */}
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/[0.07] shrink-0 gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/40 overflow-hidden">
+                  {filesSection === 'local' ? (
+                    <>
+                      <button onClick={() => setCurrentPath('/home')} className="hover:text-white/70 transition-colors shrink-0"><Folder size={13} /></button>
+                      {pathParts.map((part, i) => (
+                        <span key={i} className="flex items-center shrink-0">
+                          <ChevronRight size={10} className="text-white/20 mx-0.5" />
+                          <span className="hover:text-white/70 cursor-pointer" onClick={() => setCurrentPath('/' + pathParts.slice(0, i + 1).join('/'))}>{part}</span>
+                        </span>
+                      ))}
+                    </>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><Lock size={12} className="text-violet-400"/><span className="text-violet-300/70">Sovereign Vault Archive</span></span>
+                  )}
                 </div>
-              )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {filesSection === 'local' && currentPath !== '/home' && (
+                    <button onClick={() => setCurrentPath(currentPath.split('/').slice(0, -1).join('/') || '/home')}
+                      className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-all text-[9px] font-mono">← Back</button>
+                  )}
+                  <span className="text-[8px] text-white/20">{filesSection === 'local' ? `${currentFiles.length} items` : `${dbVaultFiles.length} files`}</span>
+                </div>
+              </div>
+
+              {/* Content area */}
+              <div className="flex-1 overflow-y-auto p-3">
+                {filesSection === 'local' ? (
+                  <div>
+                    {currentFiles.length > 0 ? (
+                      <>
+                        {/* List view */}
+                        <div className="text-[8px] uppercase tracking-wider text-white/20 grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 pb-1.5 border-b border-white/[0.04]">
+                          <span>Name</span><span>Modified</span><span>Size</span>
+                        </div>
+                        <div className="space-y-0.5 mt-1.5">
+                          {currentFiles.map(file => {
+                            const FI = file.icon;
+                            const isFolder = file.type === 'folder';
+                            return (
+                              <div key={file.name}
+                                className={`grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-2 rounded-xl items-center cursor-pointer transition-all
+                                  ${selectedFile === file.name ? 'bg-blue-500/10 border border-blue-500/20' : 'hover:bg-white/[0.03] border border-transparent'}`}
+                                onClick={() => setSelectedFile(file.name === selectedFile ? null : file.name)}
+                                onDoubleClick={() => isFolder && setCurrentPath(`${currentPath}/${file.name}`)}>
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <FI size={16} className={isFolder ? 'text-amber-400 shrink-0' : 'text-blue-400/70 shrink-0'} />
+                                  <span className="text-[10px] text-white/70 truncate">{file.name}</span>
+                                  {isFolder && <ChevronRight size={10} className="text-white/15 shrink-0 ml-auto" />}
+                                </div>
+                                <span className="text-[9px] text-white/25 font-mono">{file.modified || '—'}</span>
+                                <span className="text-[9px] text-white/25 font-mono w-14 text-right">{file.size || (isFolder ? '—' : '')}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-40 text-white/20">
+                        <FolderOpen size={28} className="mb-2 opacity-40" />
+                        <span className="text-[9px]">Empty folder</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="flex items-center gap-1.5 text-[8px] text-violet-400/60 font-mono bg-violet-500/10 border border-violet-500/20 rounded-lg px-2.5 py-1">
+                        <Lock size={9}/> {dbVaultFiles.filter(f => f.encrypted).length} encrypted · {dbVaultFiles.filter(f => !f.encrypted).length} plaintext
+                      </span>
+                    </div>
+                    {dbVaultFiles.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-40 text-white/20">
+                        <Lock size={28} className="mb-2 opacity-40" />
+                        <span className="text-[9px]">No vault files</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                        {dbVaultFiles.map(vf => {
+                          const VI = vaultFileTypeIcon(vf.file_type);
+                          const isSelected = selectedVaultFile === vf.id;
+                          return (
+                            <div key={vf.id}
+                              onClick={() => setSelectedVaultFile(isSelected ? null : vf.id)}
+                              className={`card-glass rounded-xl p-3 flex flex-col items-center gap-2 cursor-pointer transition-all duration-200
+                                ${isSelected ? 'border-violet-500/40 bg-violet-500/10' : 'hover:border-violet-500/20'}`}>
+                              <div className="relative">
+                                <VI size={24} className={vf.encrypted ? 'text-amber-400/70' : 'text-white/40'} />
+                                {vf.encrypted && <Lock size={9} className="absolute -bottom-1 -right-1 text-amber-500" />}
+                              </div>
+                              <span className="text-[9px] font-mono text-white/60 text-center">{vf.name}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[7px] px-1.5 py-0.5 rounded-full border font-mono
+                                  ${vf.encrypted ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'}`}>
+                                  {vf.encrypted ? 'ENC' : 'PLAIN'}
+                                </span>
+                                <span className="text-[7px] text-white/20">{vf.file_type}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Status bar */}
+              <div className="shrink-0 border-t border-white/[0.05] px-3 py-1.5 flex items-center gap-3 text-[8px] text-white/20 font-mono">
+                {selectedFile && filesSection === 'local' && <span>Selected: {selectedFile}</span>}
+                {selectedVaultFile && filesSection === 'vault' && (
+                  <span>Selected: {dbVaultFiles.find(f => f.id === selectedVaultFile)?.name}</span>
+                )}
+                <span className="ml-auto">Aethelis OS · Planetary File System v3</span>
+              </div>
             </div>
           </div>
         );
@@ -2609,116 +3407,261 @@ export default function AethelisOS() {
               )}
               {settingsTab === 'Display' && (
                 <div className="space-y-4">
-                  <h3 className="text-lg font-light text-white/85 mb-4">Display</h3>
+                  <h3 className="text-lg font-light text-white/85 mb-1">Display</h3>
+                  <p className="text-[9px] text-white/30 mb-4">Visual appearance and rendering preferences.</p>
+
+                  {/* Brightness preview */}
                   <div className="card-glass rounded-2xl p-4 space-y-4">
                     <div>
                       <div className="flex justify-between mb-2">
                         <p className="text-xs text-white/80">Brightness</p>
-                        <span className="text-xs text-white/50">{brightness}%</span>
+                        <span className="text-xs font-mono text-sky-400">{brightness}%</span>
                       </div>
                       <input type="range" min="20" max="100" value={brightness} onChange={e => setBrightness(parseInt(e.target.value))}
-                        className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-sky-400" />
+                        className="w-full accent-sky-400 cursor-pointer" />
+                      {/* Live preview */}
+                      <div className="mt-3 h-8 rounded-xl transition-all duration-300 border border-white/[0.06]"
+                        style={{ background: `rgba(255,255,255,${brightness / 400})`, backdropFilter: `brightness(${brightness / 100})` }}>
+                        <div className="h-full flex items-center justify-center text-[8px] text-white/40 font-mono">Preview</div>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Dock appearance */}
+                  <div className="card-glass rounded-2xl p-4 space-y-3">
+                    <p className="text-xs text-white/80 mb-2">Interface</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-white/70">Dark Mode</p>
+                        <p className="text-[9px] text-white/35">Sovereign dark appearance</p>
+                      </div>
+                      <button onClick={() => setDarkMode(!darkMode)}
+                        className={`w-11 h-6 rounded-full transition-all relative ${darkMode ? 'bg-sky-500' : 'bg-white/10'}`}>
+                        <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${darkMode ? 'left-6' : 'left-1'}`}></span>
+                      </button>
+                    </div>
+                    <div className="border-t border-white/[0.06] pt-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-white/70">Accent Theme</p>
+                        <p className="text-[9px] text-white/35">Cyber-HUD neon palette</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        {['#38bdf8','#a78bfa','#34d399','#fbbf24','#f87171'].map(c => (
+                          <div key={c} className="w-5 h-5 rounded-full border-2 border-white/20 cursor-pointer hover:scale-110 transition-transform"
+                            style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Display info */}
                   <div className="card-glass rounded-2xl p-4">
-                    <p className="text-xs text-white/80 mb-3">Resolution</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['1920x1080','2560x1440','3840x2160'].map(res => (
-                        <button key={res} className="btn-glass rounded-lg py-2 text-[9px] text-white/70 hover:text-white">
-                          {res}
-                        </button>
-                      ))}
+                    <p className="text-xs text-white/80 mb-3">Display Info</p>
+                    <div className="space-y-2 text-[10px]">
+                      <div className="flex justify-between"><span className="text-white/40">Resolution</span><span className="text-white/70 font-mono">{window.screen.width}×{window.screen.height}</span></div>
+                      <div className="flex justify-between"><span className="text-white/40">Color Depth</span><span className="text-white/70 font-mono">{window.screen.colorDepth}-bit</span></div>
+                      <div className="flex justify-between"><span className="text-white/40">Pixel Ratio</span><span className="text-white/70 font-mono">{window.devicePixelRatio}×</span></div>
                     </div>
                   </div>
                 </div>
               )}
+
               {settingsTab === 'Sound' && (
                 <div className="space-y-4">
-                  <h3 className="text-lg font-light text-white/85 mb-4">Sound</h3>
-                  <div className="card-glass rounded-2xl p-4 space-y-4">
+                  <h3 className="text-lg font-light text-white/85 mb-1">Sound</h3>
+                  <p className="text-[9px] text-white/30 mb-4">Audio output and notification settings.</p>
+
+                  <div className="card-glass rounded-2xl p-4 space-y-5">
+                    {/* Master volume */}
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs text-white/80">Master Volume</p>
+                        <p className="text-[10px] text-white/80">Master Volume</p>
                         <div className="flex items-center gap-2">
-                          <Volume2 size={14} className="text-white/50" />
-                          <span className="text-xs text-white/50">{volume}%</span>
+                          {volume === 0 ? <VolumeX size={14} className="text-red-400" /> : <Volume2 size={14} className="text-emerald-400" />}
+                          <span className="text-[10px] font-mono text-emerald-400">{volume}%</span>
                         </div>
                       </div>
                       <input type="range" min="0" max="100" value={volume} onChange={e => setVolume(parseInt(e.target.value))}
-                        className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-400" />
+                        className="w-full accent-emerald-400 cursor-pointer" />
+                      {/* Visual bars */}
+                      <div className="flex gap-0.5 mt-2 h-4 items-end">
+                        {Array.from({ length: 20 }).map((_, i) => (
+                          <div key={i} className="flex-1 rounded-sm transition-all duration-150"
+                            style={{
+                              height: `${((i + 1) / 20) * 100}%`,
+                              backgroundColor: i * 5 < volume ? (i < 13 ? '#34d399' : i < 17 ? '#fbbf24' : '#f87171') : 'rgba(255,255,255,0.1)'
+                            }} />
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between border-t border-white/10 pt-4">
-                      <p className="text-xs text-white/80">Mute</p>
-                      <button className={`w-11 h-6 rounded-full transition-all relative ${volume === 0 ? 'bg-red-500' : 'bg-white/10'}`}>
+
+                    <div className="border-t border-white/[0.06] pt-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-white/70">Mute All</p>
+                        <p className="text-[9px] text-white/35">Silence all audio output</p>
+                      </div>
+                      <button onClick={() => setVolume(volume > 0 ? 0 : 75)}
+                        className={`w-11 h-6 rounded-full transition-all relative ${volume === 0 ? 'bg-red-500' : 'bg-white/10'}`}>
                         <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${volume === 0 ? 'left-6' : 'left-1'}`}></span>
                       </button>
                     </div>
                   </div>
-                </div>
-              )}
-              {settingsTab === 'Network' && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-light text-white/85 mb-4">Network</h3>
-                  <div className="card-glass rounded-2xl p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <Wifi size={20} className="text-emerald-400" />
-                        <div>
-                          <p className="text-xs text-white/80">Aethelis-Bridge</p>
-                          <p className="text-[9px] text-white/40">Connected</p>
-                        </div>
-                      </div>
-                      <span className="text-xs text-emerald-400 font-medium">Active</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
-                      <div>
-                        <p className="text-[9px] text-white/40">IP Address</p>
-                        <p className="text-[10px] text-white/70 font-mono">192.168.1.100</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] text-white/40">MAC Address</p>
-                        <p className="text-[10px] text-white/70 font-mono">a4:83:e7:xx:xx:xx</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] text-white/40">Download</p>
-                        <p className="text-[10px] text-white/70">125 Mbps</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] text-white/40">Upload</p>
-                        <p className="text-[10px] text-white/70">45 Mbps</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {settingsTab === 'Privacy' && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-light text-white/85 mb-4">Privacy & Security</h3>
-                  <div className="card-glass rounded-2xl p-4 space-y-4">
+
+                  <div className="card-glass rounded-2xl p-4 space-y-3">
+                    <p className="text-[10px] text-white/80 mb-2">Notification Sounds</p>
                     {[
-                      { label: 'Location Services', desc: 'Allow apps to request location', on: true },
-                      { label: 'Camera Access', desc: 'Allow apps to use camera', on: true },
-                      { label: 'Microphone Access', desc: 'Allow apps to use microphone', on: true },
-                      { label: 'Analytics', desc: 'Share anonymous usage data', on: false },
-                    ].map(item => (
-                      <div key={item.label} className="flex items-center justify-between">
+                      { label: 'System Alerts', desc: 'Critical system notifications', on: notifications },
+                      { label: 'Oracle Responses', desc: 'Q-Bit Core audio feedback', on: true },
+                      { label: 'Agentic Events', desc: 'Scheduler job completions', on: false },
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs text-white/80">{item.label}</p>
-                          <p className="text-[9px] text-white/40">{item.desc}</p>
+                          <p className="text-[10px] text-white/70">{item.label}</p>
+                          <p className="text-[9px] text-white/35">{item.desc}</p>
                         </div>
-                        <button className={`w-11 h-6 rounded-full transition-all relative ${item.on ? 'bg-sky-500' : 'bg-white/10'}`}>
+                        <button onClick={() => item.label === 'System Alerts' && setNotifications(!notifications)}
+                          className={`w-11 h-6 rounded-full transition-all relative ${item.on ? 'bg-sky-500' : 'bg-white/10'}`}>
                           <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${item.on ? 'left-6' : 'left-1'}`}></span>
                         </button>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {settingsTab === 'Network' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-light text-white/85 mb-1">Network</h3>
+                  <p className="text-[9px] text-white/30 mb-4">Live network telemetry and proxy configuration.</p>
+
+                  {/* Live network card */}
                   <div className="card-glass rounded-2xl p-4">
-                    <div className="flex items-center gap-3 text-red-400">
-                      <Shield size={20} />
-                      <div>
-                        <p className="text-xs">Security Status</p>
-                        <p className="text-[9px] text-white/40">All systems protected</p>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+                          <Wifi size={16} className="text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-white/80 font-medium">Aethelis Sovereign Bridge</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <p className="text-[8px] text-emerald-400 font-mono">{daemonConnected ? 'DAEMON CONNECTED' : 'SIMULATION MODE'}</p>
+                          </div>
+                        </div>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/[0.06]">
+                      {[
+                        { label: 'RX Rate', value: `${hwData.network.rxKbps.toFixed(1)} KB/s`, color: 'text-emerald-400' },
+                        { label: 'TX Rate', value: `${hwData.network.txKbps.toFixed(1)} KB/s`, color: 'text-amber-400' },
+                        { label: 'Connections', value: hwData.network.connections.toString(), color: 'text-sky-400' },
+                        { label: 'Latency', value: '2ms', color: 'text-white/70' },
+                        { label: 'Nodes Online', value: stats.nodes.toLocaleString(), color: 'text-white/70' },
+                        { label: 'Packet Loss', value: '0.00%', color: 'text-white/70' },
+                      ].map(s => (
+                        <div key={s.label}>
+                          <p className="text-[8px] text-white/35 uppercase tracking-wider">{s.label}</p>
+                          <p className={`text-[11px] font-mono mt-0.5 ${s.color}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Network I/O chart */}
+                  <div className="card-glass rounded-2xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[9px] uppercase tracking-widest text-white/35">I/O History (30s)</p>
+                      <div className="flex gap-3 text-[8px]">
+                        <span className="flex items-center gap-1"><span className="w-2 h-1 bg-emerald-400/60 rounded"></span><span className="text-white/30">RX</span></span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-1 bg-amber-400/60 rounded"></span><span className="text-white/30">TX</span></span>
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <Sparkline data={rxHistory} color="#34d399" h={36} />
+                      <div className="absolute inset-0 opacity-60"><Sparkline data={txHistory} color="#fbbf24" h={36} /></div>
+                    </div>
+                  </div>
+
+                  {/* Proxy config */}
+                  <div className="card-glass rounded-2xl p-4">
+                    <p className="text-[10px] text-white/80 mb-3">Proxy Configuration</p>
+                    <div className="space-y-2">
+                      {wpNodes.slice(0, 3).map(node => (
+                        <div key={node.id} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
+                          <div>
+                            <p className="text-[10px] text-white/70">{node.name}</p>
+                            <p className="text-[8px] font-mono text-white/30">{node.url}</p>
+                          </div>
+                          <span className={`text-[8px] px-2 py-0.5 rounded-full border font-mono
+                            ${node.status === 'online' ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-amber-400 border-amber-500/20 bg-amber-500/10'}`}>
+                            {node.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === 'Privacy' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-light text-white/85 mb-1">Privacy & Security</h3>
+                  <p className="text-[9px] text-white/30 mb-4">Zero-trust privacy controls and security audit.</p>
+
+                  <div className="card-glass rounded-2xl p-4 space-y-4">
+                    <p className="text-[10px] text-white/60 uppercase tracking-wider mb-2">Permissions</p>
+                    {[
+                      { label: 'Notifications', desc: 'System alert popups', state: notifications, setter: () => setNotifications(!notifications) },
+                      { label: 'System Analytics', desc: 'Anonymous usage telemetry', state: false, setter: () => {} },
+                      { label: 'Oracle Memory', desc: 'Persist Q-Bit Core chat history', state: true, setter: () => {} },
+                      { label: 'Auto-Lock Vault', desc: 'Lock vault on window close', state: true, setter: () => {} },
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] text-white/70">{item.label}</p>
+                          <p className="text-[9px] text-white/35">{item.desc}</p>
+                        </div>
+                        <button onClick={item.setter}
+                          className={`w-11 h-6 rounded-full transition-all relative ${item.state ? 'bg-sky-500' : 'bg-white/10'}`}>
+                          <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${item.state ? 'left-6' : 'left-1'}`}></span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Security status */}
+                  <div className="card-glass rounded-2xl p-4">
+                    <p className="text-[10px] text-white/60 uppercase tracking-wider mb-3">Security Audit</p>
+                    <div className="space-y-2">
+                      {[
+                        { label: 'Vault Encryption', status: 'AES-256-GCM Active', ok: true },
+                        { label: 'RLS Policies', status: 'Supabase row-level security', ok: true },
+                        { label: 'Oracle Memory', status: `${oracleMessages.length} messages stored`, ok: true },
+                        { label: 'Daemon Auth', status: daemonConnected ? 'WebSocket authenticated' : 'Disconnected (simulation)', ok: daemonConnected },
+                      ].map(item => (
+                        <div key={item.label} className="flex items-center gap-3 py-1.5 border-b border-white/[0.04] last:border-0">
+                          <CheckCircle size={13} className={item.ok ? 'text-emerald-400' : 'text-amber-400'} />
+                          <div className="flex-1">
+                            <p className="text-[10px] text-white/70">{item.label}</p>
+                            <p className="text-[8px] text-white/35 font-mono">{item.status}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Danger zone */}
+                  <div className="card-glass rounded-2xl p-4 border border-red-500/10">
+                    <p className="text-[10px] text-red-400/60 uppercase tracking-wider mb-3">Danger Zone</p>
+                    <div className="space-y-2">
+                      <button onClick={() => { setOracleMessages([{ role: 'oracle', text: 'I am the Oracle of Aethelis. Ask, and the prophetic circuits shall reveal.' }]); logSystem('vault', 'warn', 'Oracle memory cleared by user.'); }}
+                        className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-red-400/70 hover:text-red-300 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20">
+                        Clear Oracle Memory
+                      </button>
+                      <button onClick={() => { setVaultAuthed(false); setSecureNotes([]); logSystem('vault', 'warn', 'Vault manually locked.'); }}
+                        className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-red-400/70 hover:text-red-300 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20">
+                        Lock Vault Now
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2738,12 +3681,12 @@ export default function AethelisOS() {
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col select-none"
-      style={{ background: '#040112' }}
+      style={{ background: 'radial-gradient(ellipse at center, #0d1627 0%, #050811 70%)' }}
       onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
 
       {/* Boot Sequence */}
       {isBooting && (
-        <div className="boot-screen fixed inset-0 z-[100] flex flex-col items-center justify-center" style={{ background: '#040112' }}>
+        <div className="boot-screen fixed inset-0 z-[100] flex flex-col items-center justify-center" style={{ background: 'radial-gradient(ellipse at center, #0d1627 0%, #050811 70%)' }}>
           <div className="boot-logo text-center mb-8">
             <div className="text-4xl sm:text-6xl font-extralight text-white/90 tracking-[0.3em] mb-2">AETHELIS</div>
             <div className="text-[10px] sm:text-xs text-white/40 font-mono tracking-widest">SOVEREIGN WEB OS</div>
@@ -2763,15 +3706,15 @@ export default function AethelisOS() {
         {/* Aurora band — top */}
         <div className="absolute -top-1/4 left-0 right-0 h-[60vh] opacity-40"
           style={{
-            background: 'linear-gradient(120deg, transparent 0%, rgba(0,200,255,0.12) 30%, rgba(120,80,255,0.10) 60%, transparent 100%)',
+            background: 'linear-gradient(120deg, transparent 0%, rgba(0,200,255,0.15) 30%, rgba(120,80,255,0.12) 60%, transparent 100%)',
             filter: 'blur(80px)',
             animation: 'float1 25s ease-in-out infinite',
           }} />
 
         {/* Aurora band — bottom */}
-        <div className="absolute -bottom-1/4 left-0 right-0 h-[50vh] opacity-30"
+        <div className="absolute -bottom-1/4 left-0 right-0 h-[50vh] opacity-40"
           style={{
-            background: 'linear-gradient(280deg, transparent 0%, rgba(180,60,255,0.10) 35%, rgba(0,220,200,0.08) 65%, transparent 100%)',
+            background: 'linear-gradient(280deg, transparent 0%, rgba(180,60,255,0.12) 35%, rgba(0,220,200,0.10) 65%, transparent 100%)',
             filter: 'blur(90px)',
             animation: 'float2 30s ease-in-out infinite',
           }} />
@@ -2779,7 +3722,7 @@ export default function AethelisOS() {
         {/* Cyan orb — top left */}
         <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full"
           style={{
-            background: 'radial-gradient(circle, rgba(0,240,255,0.15) 0%, rgba(0,240,255,0.05) 40%, transparent 70%)',
+            background: 'radial-gradient(circle, rgba(34, 211, 238, 0.18) 0%, rgba(34, 211, 238, 0.06) 40%, transparent 70%)',
             filter: 'blur(100px)',
             animation: 'float1 20s ease-in-out infinite',
           }} />
@@ -2787,18 +3730,37 @@ export default function AethelisOS() {
         {/* Magenta orb — bottom right */}
         <div className="absolute -bottom-48 -right-48 w-[600px] h-[600px] rounded-full"
           style={{
-            background: 'radial-gradient(circle, rgba(181,55,242,0.12) 0%, rgba(181,55,242,0.04) 40%, transparent 70%)',
+            background: 'radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 40%, transparent 70%)',
             filter: 'blur(120px)',
             animation: 'float2 25s ease-in-out infinite',
+          }} />
+
+        {/* Emerald orb — center right accent */}
+        <div className="absolute top-1/4 right-1/4 w-[350px] h-[350px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(52, 211, 153, 0.10) 0%, rgba(52, 211, 153, 0.03) 50%, transparent 70%)',
+            filter: 'blur(90px)',
+            animation: 'float3 22s ease-in-out infinite',
           }} />
 
         {/* Secondary cyan orb */}
         <div className="absolute top-1/2 left-1/3 w-[400px] h-[400px] rounded-full"
           style={{
-            background: 'radial-gradient(circle, rgba(0,240,255,0.08) 0%, transparent 60%)',
+            background: 'radial-gradient(circle, rgba(34, 211, 238, 0.10) 0%, transparent 60%)',
             filter: 'blur(80px)',
             animation: 'float3 30s ease-in-out infinite',
           }} />
+
+        {/* Rose accent orb — bottom left */}
+        <div className="absolute bottom-1/4 -left-24 w-[300px] h-[300px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(244, 63, 94, 0.08) 0%, transparent 60%)',
+            filter: 'blur(70px)',
+            animation: 'float1 28s ease-in-out infinite reverse',
+          }} />
+
+        {/* Nebula layer */}
+        <div className="absolute inset-0 wallpaper-nebula" />
 
         {/* Starfield layer 1 (small, dense) */}
         <div className="absolute inset-0 wallpaper-stars-sm" />
@@ -2808,17 +3770,23 @@ export default function AethelisOS() {
         <div className="absolute inset-0 wallpaper-stars-lg" />
 
         {/* Subtle grid mesh */}
-        <div className="absolute inset-0 opacity-[0.04]"
+        <div className="absolute inset-0 opacity-[0.03]"
           style={{
-            backgroundImage: 'linear-gradient(rgba(120,160,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(120,160,255,0.5) 1px, transparent 1px)',
-            backgroundSize: '60px 60px',
-            maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 80%)',
-            WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 80%)',
+            backgroundImage: 'linear-gradient(rgba(34, 211, 238, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 211, 238, 0.4) 1px, transparent 1px)',
+            backgroundSize: '80px 80px',
+            maskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+          }} />
+
+        {/* Premium noise texture overlay */}
+        <div className="absolute inset-0 opacity-[0.015] pointer-events-none"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
           }} />
 
         {/* Vignette for depth */}
         <div className="absolute inset-0"
-          style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%)' }} />
+          style={{ background: 'radial-gradient(ellipse at center, transparent 40%, rgba(3, 7, 18, 0.6) 100%)' }} />
       </div>
 
       {/* Menu Bar - Desktop: Full telemetry | Mobile: Minimal */}
@@ -2902,29 +3870,47 @@ export default function AethelisOS() {
         </div>
       )}
 
-      {/* Launchpad */}
+      {/* Launchpad - Phase 14: Five Spheres of Totality */}
       {launchpadOpen && (
-        <div className="fixed inset-0 z-[90] flex flex-col items-center justify-center p-4 sm:p-8 glass-dark" onClick={() => setLaunchpadOpen(false)}>
-          {/* Search */}
-          <div className="relative mb-6 w-full max-w-xs sm:max-w-sm" onClick={e=>e.stopPropagation()}>
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"/>
-            <input
-              placeholder="Search apps…"
-              className="w-full rounded-xl pl-9 pr-4 py-3 sm:py-2.5 text-sm sm:text-[11px] text-white/80 placeholder-white/40 outline-none focus:border-white/40"
-              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-            />
+        <div className="fixed inset-0 z-[90] flex flex-col items-center justify-start pt-8 sm:pt-12 p-4 sm:p-8 overflow-y-auto" style={{ background: 'radial-gradient(ellipse at center, rgba(13,22,39,0.95) 0%, rgba(5,8,17,0.98) 100%)' }} onClick={() => setLaunchpadOpen(false)}>
+          {/* Title */}
+          <div className="text-center mb-6" onClick={e=>e.stopPropagation()}>
+            <h2 className="text-2xl sm:text-3xl font-light tracking-widest text-white/90 mb-1">SOVEREIGN OPERATIONS</h2>
+            <p className="text-[10px] text-white/40 uppercase tracking-wider">The Five Spheres of Totality</p>
           </div>
 
-          {/* App Grid - Mobile: 4 columns, Desktop: 4-5 columns */}
-          <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 gap-4 sm:gap-6 md:gap-8 max-w-lg w-full px-2" onClick={e=>e.stopPropagation()}>
-            {Object.values(APPS).map(app => {
-              const AI = app.icon;
+          {/* Five Spheres Grid */}
+          <div className="w-full max-w-4xl space-y-4 sm:space-y-6 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            {(Object.keys(SPHERES) as SphereKey[]).map(sphereKey => {
+              const sphere = SPHERES[sphereKey];
+              const sphereApps = Object.values(APPS).filter(app => app.sphere === sphereKey);
+              if (sphereApps.length === 0) return null;
+
               return (
-                <div key={app.id} onClick={()=>openApp(app)} className="flex flex-col items-center gap-2 cursor-pointer group active:scale-95 transition-transform">
-                  <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-150 group-active:scale-95 bg-gradient-to-br ${app.gradient} text-white border border-white/15`}>
-                    <AI size={24}/>
+                <div key={sphereKey} className={`card-glass rounded-2xl p-4 sm:p-5 border ${sphere.border} transition-all duration-300 hover:border-opacity-50`}>
+                  {/* Sphere Header */}
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className={`w-2 h-2 rounded-full ${sphere.color.replace('text-', 'bg-')} animate-pulse`} />
+                    <h3 className={`text-xs sm:text-sm font-semibold tracking-wider uppercase ${sphere.color}`}>
+                      {sphere.name}
+                    </h3>
+                    <span className="text-[9px] text-white/30 ml-auto">{sphere.desc}</span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] font-medium text-white/80 drop-shadow-sm text-center leading-tight">{app.title}</span>
+
+                  {/* Apps in Sphere */}
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4">
+                    {sphereApps.map(app => {
+                      const AI = app.icon;
+                      return (
+                        <div key={app.id} onClick={()=>openApp(app)} className="flex flex-col items-center gap-2 cursor-pointer group transition-all duration-300 hover:scale-105">
+                          <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shadow-lg transition-all duration-300 group-hover:shadow-xl bg-gradient-to-br ${app.gradient} text-white border border-white/15`}>
+                            <AI size={22} className="group-hover:scale-110 transition-transform duration-300"/>
+                          </div>
+                          <span className="text-[8px] sm:text-[10px] font-medium text-white/70 group-hover:text-white/90 text-center leading-tight transition-colors duration-300">{app.title}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
@@ -2937,6 +3923,76 @@ export default function AethelisOS() {
 
       {/* Desktop / Window Container */}
       <div className={`flex-1 relative overflow-hidden z-10 ${isMobile ? 'pb-16' : ''}`}>
+
+        {/* Desktop Idle Widgets — shown when no windows visible */}
+        {!isMobile && (windows.length === 0 || windows.every(w => minimized.includes(w.id))) && !launchpadOpen && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 pointer-events-none select-none animate-fade-in">
+            {/* Hero Clock */}
+            <div className="text-center">
+              <div className="text-[5rem] font-extralight font-mono tracking-widest text-white/90 leading-none"
+                style={{ textShadow: '0 0 60px rgba(34,211,238,0.3), 0 0 120px rgba(34,211,238,0.1)' }}>
+                {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+              <div className="text-sm font-light text-white/30 tracking-[0.5em] uppercase mt-2">
+                {time.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </div>
+            </div>
+
+            {/* Stats strip */}
+            <div className="flex items-center gap-4 pointer-events-auto">
+              {[
+                { icon: Cpu,       label: 'CPU',     value: `${stats.cpu.toFixed(1)}%`,        color: '#38bdf8' },
+                { icon: HardDrive, label: 'RAM',     value: `${stats.ram.toFixed(1)}%`,         color: '#a78bfa' },
+                { icon: Activity,  label: 'Nodes',   value: stats.nodes.toLocaleString(),       color: '#34d399' },
+                { icon: Coins,     label: 'ATH',     value: athCurrentPrice.toFixed(0),         color: '#fbbf24' },
+              ].map(s => { const SI = s.icon; return (
+                <div key={s.label} className="flex flex-col items-center gap-1 px-4 py-3 card-glass rounded-2xl min-w-[80px]">
+                  <SI size={14} style={{ color: s.color }} />
+                  <span className="text-base font-mono font-light" style={{ color: s.color }}>{s.value}</span>
+                  <span className="text-[8px] uppercase tracking-widest text-white/30">{s.label}</span>
+                </div>
+              );})}
+            </div>
+
+            {/* Quick launch row */}
+            <div className="flex items-center gap-3 pointer-events-auto">
+              <span className="text-[9px] uppercase tracking-widest text-white/20 mr-1">Quick Open</span>
+              {[APPS.DASHBOARD, APPS.ORACLE, APPS.LEDGER, APPS.ENTERPRISE, APPS.VAULT].map(app => {
+                const AI = app.icon;
+                return (
+                  <button key={app.id} onClick={() => openApp(app)}
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br ${app.gradient} text-white
+                      shadow-lg hover:scale-110 active:scale-95 transition-all duration-200 border border-white/10`}>
+                    <AI size={18} />
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Recent events ticker */}
+            {events.length > 0 && (
+              <div className="max-w-md w-full px-4">
+                <div className="card-glass rounded-2xl p-3 border border-white/[0.05]">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="text-[8px] uppercase tracking-widest text-white/30">Live Events</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {events.slice(0, 3).map(ev => (
+                      <div key={ev.id} className="flex items-start gap-2 text-[9px]">
+                        <span className="text-white/20 font-mono shrink-0">{new Date(ev.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                        <span className="text-white/50 truncate">{ev.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <p className="text-[9px] text-white/15 tracking-widest uppercase">Click the dock to open apps</p>
+          </div>
+        )}
+
         {windows.map(win => {
           if (minimized.includes(win.id)) return null;
           const WI = win.icon;
@@ -2963,7 +4019,8 @@ export default function AethelisOS() {
             <div key={win.id} onMouseDown={() => bringToFront(win.id)} style={windowStyle}
               className={`absolute flex flex-col overflow-hidden
                 ${active ? 'window-glass' : 'window-glass-inactive'}
-                ${isMobile || win.isMaximized ? '!rounded-none border-none' : 'rounded-2xl'}
+                ${APP_NEON_BORDERS[win.id] || 'border-t-white/10'}
+                ${isMobile || win.isMaximized ? '!rounded-none !border-none' : 'rounded-2xl'}
               `}>
               {/* Titlebar */}
               <div
