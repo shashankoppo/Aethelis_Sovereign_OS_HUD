@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   Search, Wifi, Battery, Network, Terminal, ShoppingBag,
   ShieldAlert, X, Minus, Maximize2, Settings, Globe, Coins,
@@ -13,8 +13,11 @@ import {
   Sun, Moon, Volume2, VolumeX, Monitor, Palette,
   Clock, Calendar, Mail, MessageSquare, AlertTriangle,
   BookOpen, Sparkles, Send, Compass, Target, Crosshair,
-  Brain, Timer, Network as NetworkIcon
+  Brain, Timer, Network as NetworkIcon, ChevronDown,
+  Sliders, Check, RotateCcw, Wallpaper, Type, MousePointer2
 } from 'lucide-react';
+import { useTheme, OS_THEMES, WALLPAPERS, ACCENT_COLORS, FONT_FAMILIES } from './contexts/ThemeContext';
+import type { OSThemeId, WallpaperId, AccentColor, FontFamily, DockPosition, BorderRadius, AnimationSpeed, IconSize } from './contexts/ThemeContext';
 import { supabase } from './lib/supabase';
 import type {
   LedgerTransaction, LogisticsOrder, MarketModule, SystemEvent,
@@ -30,6 +33,16 @@ import type { OracleConfig, ElsxLead, ElsxShipment, ElsxAllocation, ProxyNode, B
 import { useHardwareTelemetry } from './hooks/useHardwareTelemetry';
 import { unlockVault, lockVault, listNotes, saveNote, deleteNote, type SecureNote } from './lib/secureVault';
 import { agenticScheduler, useAgenticEvents, agenticEventBus, type AgenticEvent } from './lib/AgenticScheduler';
+
+// Phase 15/16: Import contexts and reusable components
+import { useOS } from './contexts/OSContext';
+import { useTelemetry } from './contexts/TelemetryContext';
+import { useSecureVault } from './hooks/useSecureVault';
+import { useAgenticScheduler } from './hooks/useAgenticScheduler';
+import {
+  GlassPanel, CyberButton, IconButton, TrafficLights,
+  Skeleton, LoadingGrid, EmptyState, ErrorState
+} from './components/ui';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,11 +62,11 @@ interface TermLog { type: 'user' | 'sys' | 'info' | 'err'; text: string; }
 // ─── The Five Spheres of Totality (Phase 14) ───────────────────────────────
 
 const SPHERES = {
-  CORE: { name: 'Sphere I: Core & Control', desc: 'System Core', color: 'text-cyan-400', border: 'border-cyan-500/30' },
-  INTEL: { name: 'Sphere II: Intelligence & Philosophy', desc: 'Intelligence', color: 'text-purple-400', border: 'border-purple-500/30' },
-  RESOURCE: { name: 'Sphere III: Resource & Logistics', desc: 'Operations', color: 'text-emerald-400', border: 'border-emerald-500/30' },
-  WEALTH: { name: 'Sphere IV: Private Wealth', desc: 'Treasury', color: 'text-amber-400', border: 'border-amber-500/30' },
-  SECURITY: { name: 'Sphere V: Zero-Trust Security', desc: 'Fortress', color: 'text-red-400', border: 'border-red-500/30' },
+  CORE:     { name: 'System',       label: 'Workspace & System',      desc: 'Core utilities, terminal, files', color: 'text-cyan-400',    border: 'border-cyan-500/30',    dot: 'bg-cyan-400' },
+  INTEL:    { name: 'Intelligence', label: 'Intelligence & AI',        desc: 'AI assistant, philosophy',        color: 'text-violet-400',  border: 'border-violet-500/30',  dot: 'bg-violet-400' },
+  RESOURCE: { name: 'Operations',   label: 'Business & Operations',    desc: 'Enterprise, marketplace',         color: 'text-emerald-400', border: 'border-emerald-500/30', dot: 'bg-emerald-400' },
+  WEALTH:   { name: 'Finance',      label: 'Finance & Treasury',       desc: 'Ledger, assets, wealth',          color: 'text-amber-400',   border: 'border-amber-500/30',   dot: 'bg-amber-400' },
+  SECURITY: { name: 'Security',     label: 'Security & Privacy',       desc: 'Vault, nexus, emulator',          color: 'text-rose-400',    border: 'border-rose-500/30',    dot: 'bg-rose-400' },
 };
 
 // ─── App Registry (Phase 14: Five Spheres Architecture) ─────────────────────
@@ -271,11 +284,32 @@ function formatPersistenceUptime(s: number): string {
 }
 
 export default function AethelisOS() {
+  // Theme Context
+  const {
+    theme: themeSettings,
+    currentThemeDef,
+    currentAccent,
+    setOSTheme,
+    setWallpaper,
+    setAccentColor,
+    setFontFamily,
+    setDockPosition,
+    setGlassBlur,
+    setBorderRadius,
+    setAnimationSpeed,
+    setIconSize,
+    applyThemePreset,
+    resetToDefaults,
+    getWallpaperStyle,
+  } = useTheme();
+
   // OS State
   const [windows,          setWindows]          = useState<WindowState[]>([]);
   const [activeWindowId,   setActiveWindowId]   = useState<string | null>(null);
   const [minimized,        setMinimized]        = useState<string[]>([]);
   const [launchpadOpen,    setLaunchpadOpen]    = useState(false);
+  const [launchpadSearch,  setLaunchpadSearch]  = useState('');
+  const [launchpadCategory,setLaunchpadCategory]= useState<'all' | SphereKey>('all');
   const [time,             setTime]             = useState(new Date());
   const [isMobile,         setIsMobile]         = useState(false);
   const [mobileMenuOpen,   setMobileMenuOpen]   = useState(false);
@@ -392,11 +426,33 @@ export default function AethelisOS() {
   const [selectedFile,  setSelectedFile]  = useState<string | null>(null);
 
   // Settings App State
-  const [settingsTab,    setSettingsTab]   = useState<'General'|'Display'|'Sound'|'Network'|'Privacy'>('General');
+  const [settingsTab,    setSettingsTab]   = useState<'General'|'Personalize'|'Display'|'Sound'|'Network'|'Privacy'>('General');
+  const [wallpaperCustomUrl, setWallpaperCustomUrlInput] = useState('');
   const [volume,         setVolume]        = useState(75);
   const [brightness,     setBrightness]    = useState(80);
   const [notifications,  setNotifications] = useState(true);
   const [darkMode,       setDarkMode]      = useState(true);
+
+  // ── OS Facilities State ──────────────────────────────────────────────────
+  const [missionControlOpen, setMissionControlOpen] = useState(false);
+  const [controlCenterOpen,  setControlCenterOpen]  = useState(false);
+  const [spotlightOpen,      setSpotlightOpen]      = useState(false);
+  const [notifCenterOpen,    setNotifCenterOpen]    = useState(false);
+  const [appSwitcherOpen,    setAppSwitcherOpen]    = useState(false);
+  const [appSwitcherIdx,     setAppSwitcherIdx]     = useState(0);
+  const [spotlightQuery,     setSpotlightQuery]     = useState('');
+  const [dndMode,            setDndMode]            = useState(false);
+  const [focusMode,          setFocusMode]          = useState(false);
+  const [nightLight,         setNightLight]         = useState(false);
+  const [nightLightIntensity,setNightLightIntensity]= useState(30);
+  const [hotCornersEnabled,  setHotCornersEnabled]  = useState(true);
+  const [snapZone, setSnapZone] = useState<'none'|'left'|'right'|'top'|'tl'|'tr'|'bl'|'br'>('none');
+  const [pipWindowId,        setPipWindowId]        = useState<string|null>(null);
+  const [desktops, setDesktops] = useState<Array<{id: string; name: string}>>([
+    { id: 'd1', name: 'Desktop 1' },
+  ]);
+  const [currentDesktop, setCurrentDesktop] = useState(0);
+  const hotCornerTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null);
 
   // Oracle AI State
   const [oracleInput,    setOracleInput]   = useState('');
@@ -546,6 +602,86 @@ export default function AethelisOS() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Global Keyboard Shortcuts ────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      const target = e.target as HTMLElement;
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // Escape: close all overlays
+      if (e.key === 'Escape') {
+        setMissionControlOpen(false);
+        setControlCenterOpen(false);
+        setSpotlightOpen(false);
+        setNotifCenterOpen(false);
+        setAppSwitcherOpen(false);
+        setLaunchpadOpen(false);
+        return;
+      }
+
+      // Cmd/Ctrl+Space → Spotlight
+      if (meta && e.key === ' ') {
+        e.preventDefault();
+        setSpotlightOpen(p => !p);
+        setSpotlightQuery('');
+        return;
+      }
+
+      // Cmd/Ctrl+Tab → App Switcher
+      if (meta && e.key === 'Tab') {
+        e.preventDefault();
+        setAppSwitcherOpen(true);
+        setAppSwitcherIdx(p => {
+          const count = windowsRef.current.filter(w => !minimized.includes(w.id)).length;
+          return count > 0 ? (p + 1) % count : 0;
+        });
+        return;
+      }
+
+      // Cmd/Ctrl+M → Mission Control
+      if (meta && e.key === 'm' && !inInput) {
+        e.preventDefault();
+        setMissionControlOpen(p => !p);
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+N → Notification Center
+      if (meta && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        setNotifCenterOpen(p => !p);
+        return;
+      }
+
+      // Cmd/Ctrl+D → DND toggle
+      if (meta && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setDndMode(p => !p);
+        return;
+      }
+    };
+
+    // App Switcher: release modifier key to confirm selection
+    const upHandler = (e: KeyboardEvent) => {
+      if ((e.key === 'Meta' || e.key === 'Control') && appSwitcherOpen) {
+        const openWins = windowsRef.current.filter(w => !minimized.includes(w.id));
+        if (openWins[appSwitcherIdx]) {
+          bringToFront(openWins[appSwitcherIdx].id);
+        }
+        setAppSwitcherOpen(false);
+        setAppSwitcherIdx(0);
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    window.addEventListener('keyup', upHandler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('keyup', upHandler);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSwitcherOpen, appSwitcherIdx, minimized]);
 
   // Phase 6: integration fetches moved below function declarations to avoid TDZ
 
@@ -772,21 +908,56 @@ export default function AethelisOS() {
     const win = windows.find(w => w.id === isDragging);
     if (!win) return;
     const w = win.width;
-    const h = win.height;
-    // Phase 12: Strict viewport boundary enforcement
-    // Ensure at least 140px of the window remains visible on all edges
-    // This prevents users from losing access to traffic-light controls
     const minVisible = 140;
     const maxX = window.innerWidth - minVisible;
     const maxY = window.innerHeight - minVisible;
     const minX = -(w - minVisible);
-    const minY = 36; // Menu bar height
+    const minY = 36;
     const nx = Math.max(minX, Math.min(e.clientX - dragOffset.x, maxX));
     const ny = Math.max(minY, Math.min(e.clientY - dragOffset.y, maxY));
     setWindows(p => p.map(wnd => wnd.id === isDragging ? { ...wnd, x: nx, y: ny } : wnd));
+
+    // Snap zone detection
+    const SNAP_EDGE = 32;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cx = e.clientX;
+    const cy = e.clientY;
+    let zone: typeof snapZone = 'none';
+    if (cy < SNAP_EDGE) zone = cx < vw * 0.33 ? 'tl' : cx > vw * 0.67 ? 'tr' : 'top';
+    else if (cx < SNAP_EDGE) zone = cy < vh * 0.5 ? 'tl' : 'bl';
+    else if (cx > vw - SNAP_EDGE) zone = cy < vh * 0.5 ? 'tr' : 'br';
+    setSnapZone(zone);
   };
 
-  const handleMouseUp = () => setIsDragging(null);
+  const handleMouseUp = () => {
+    // Apply snap if a zone was active
+    if (snapZone !== 'none' && isDragging) {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const dockH = 70;
+      const menuH = 36;
+      const workH = vh - menuH - dockH;
+      const half = workH / 2;
+      const snapLayouts: Record<typeof snapZone, {x:number;y:number;w:number;h:number}> = {
+        none:  {x:0, y:0, w:0, h:0},
+        left:  {x:0, y:menuH, w:vw/2, h:workH},
+        right: {x:vw/2, y:menuH, w:vw/2, h:workH},
+        top:   {x:0, y:menuH, w:vw, h:workH*0.6},
+        tl:    {x:0, y:menuH, w:vw/2, h:half},
+        tr:    {x:vw/2, y:menuH, w:vw/2, h:half},
+        bl:    {x:0, y:menuH+half, w:vw/2, h:half},
+        br:    {x:vw/2, y:menuH+half, w:vw/2, h:half},
+      };
+      const sl = snapLayouts[snapZone];
+      setWindows(p => p.map(w => w.id === isDragging
+        ? { ...w, x: sl.x, y: sl.y, width: sl.w, height: sl.h, isMaximized: false }
+        : w
+      ));
+    }
+    setSnapZone('none');
+    setIsDragging(null);
+  };
 
   // ─── Terminal ────────────────────────────────────────────────────
 
@@ -3345,8 +3516,8 @@ export default function AethelisOS() {
 
       // ── Settings ─────────────────────────────────────────────────────
       case 'settings': {
-        const tabs: Array<'General'|'Display'|'Sound'|'Network'|'Privacy'> = ['General','Display','Sound','Network','Privacy'];
-        const tabIcons = { General: Settings, Display: Monitor, Sound: Volume2, Network: Wifi, Privacy: Shield };
+        const tabs: Array<'General'|'Personalize'|'Display'|'Sound'|'Network'|'Privacy'> = ['General','Personalize','Display','Sound','Network','Privacy'];
+        const tabIcons = { General: Settings, Personalize: Palette, Display: Monitor, Sound: Volume2, Network: Wifi, Privacy: Shield };
         return (
           <div className="h-full flex flex-col md:flex-row bg-slate-950/92 text-white">
             <div className="w-full md:w-52 bg-white/[0.025] border-b md:border-b-0 md:border-r border-white/[0.07] p-3 md:p-4 flex flex-row md:flex-col gap-1.5 overflow-x-auto shrink-0">
@@ -3369,7 +3540,282 @@ export default function AethelisOS() {
                 );
               })}
             </div>
-            <div className="flex-1 p-5 md:p-7 overflow-y-auto">
+            <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-0">
+              {settingsTab === 'Personalize' && (() => {
+                const allWallpapers = Object.values(WALLPAPERS).filter(w => w.id !== 'custom');
+                const themeWallpapers = allWallpapers.filter(w => w.theme === themeSettings.osTheme || w.theme === 'universal');
+                const wallpaperGroups = [
+                  { label: 'For This Theme', items: themeWallpapers },
+                  { label: 'All Wallpapers', items: allWallpapers },
+                ];
+                return (
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-semibold text-white/90">Personalize</h3>
+                      <button onClick={resetToDefaults}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] text-white/40 hover:text-white/70 hover:bg-white/5 border border-transparent hover:border-white/10 transition-all">
+                        <RotateCcw size={10} />Reset Defaults
+                      </button>
+                    </div>
+
+                    {/* ─── OS Theme Picker ─────────────────────────────── */}
+                    <div className="card-glass rounded-2xl p-4">
+                      <p className="text-xs font-medium text-white/70 mb-1">OS Theme</p>
+                      <p className="text-[9px] text-white/30 mb-3">Choose your platform aesthetic</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {(Object.values(OS_THEMES) as typeof OS_THEMES[OSThemeId][]).map(t => {
+                          const isActive = themeSettings.osTheme === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => applyThemePreset(t.id)}
+                              className={`relative group flex flex-col overflow-hidden rounded-xl border transition-all duration-300 ${
+                                isActive ? 'border-white/30 ring-1 ring-white/20 scale-[1.02]' : 'border-white/8 hover:border-white/20'
+                              }`}
+                            >
+                              {/* Preview gradient */}
+                              <div className="h-14 w-full" style={{ background: t.preview }} />
+                              <div className="p-2 bg-white/5 flex items-center justify-between gap-1">
+                                <div className="text-left">
+                                  <p className="text-[9px] font-semibold text-white/85 leading-tight">{t.name}</p>
+                                  <p className="text-[7px] text-white/35">{t.platform}</p>
+                                </div>
+                                {isActive && (
+                                  <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                                    <Check size={8} className="text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* ─── Wallpaper ───────────────────────────────────── */}
+                    <div className="card-glass rounded-2xl p-4">
+                      <p className="text-xs font-medium text-white/70 mb-1">Wallpaper</p>
+                      <p className="text-[9px] text-white/30 mb-3">Background for your desktop</p>
+
+                      {wallpaperGroups.map(group => (
+                        <div key={group.label} className="mb-3">
+                          <p className="text-[8px] text-white/25 uppercase tracking-widest mb-2">{group.label}</p>
+                          <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                            {group.items.map(wp => {
+                              const isActive = themeSettings.wallpaperId === wp.id;
+                              return (
+                                <button key={wp.id} onClick={() => setWallpaper(wp.id)}
+                                  className={`relative group aspect-video rounded-lg overflow-hidden border transition-all duration-200 ${
+                                    isActive ? 'border-white/40 ring-1 ring-white/20 scale-105' : 'border-white/8 hover:border-white/20 hover:scale-105'
+                                  }`}
+                                  title={wp.name}
+                                >
+                                  <div className="absolute inset-0" style={{ background: wp.gradient }} />
+                                  {isActive && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                      <Check size={10} className="text-white drop-shadow" />
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Custom wallpaper URL */}
+                      <div className="mt-3 border-t border-white/[0.06] pt-3">
+                        <p className="text-[9px] text-white/40 mb-2">Custom Image URL</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="url"
+                            placeholder="https://example.com/wallpaper.jpg"
+                            value={wallpaperCustomUrl}
+                            onChange={e => setWallpaperCustomUrlInput(e.target.value)}
+                            className="flex-1 px-3 py-2 rounded-lg text-[10px] text-white/80 placeholder-white/20 outline-none focus:ring-1 focus:ring-white/20"
+                            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
+                          />
+                          <button
+                            onClick={() => wallpaperCustomUrl && setWallpaper('custom', wallpaperCustomUrl)}
+                            disabled={!wallpaperCustomUrl}
+                            className="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-white/10 hover:bg-white/15 text-white/70 border border-white/10 transition-all disabled:opacity-30"
+                          >Apply</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ─── Accent Color ─────────────────────────────────── */}
+                    <div className="card-glass rounded-2xl p-4">
+                      <p className="text-xs font-medium text-white/70 mb-1">Accent Color</p>
+                      <p className="text-[9px] text-white/30 mb-3">Primary interface highlight</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(Object.entries(ACCENT_COLORS) as [AccentColor, typeof ACCENT_COLORS[AccentColor]][]).map(([key, acc]) => {
+                          const isActive = themeSettings.accentColor === key;
+                          return (
+                            <button key={key} onClick={() => setAccentColor(key)}
+                              title={acc.name}
+                              className={`group flex flex-col items-center gap-1 transition-all duration-200 ${isActive ? 'scale-110' : 'hover:scale-105'}`}
+                            >
+                              <div className={`w-7 h-7 rounded-full border-2 transition-all ${isActive ? 'border-white/60 shadow-lg' : 'border-transparent'}`}
+                                style={{ backgroundColor: acc.value, boxShadow: isActive ? `0 0 10px ${acc.value}80` : undefined }} />
+                              <span className={`text-[7px] ${isActive ? 'text-white/70' : 'text-white/25'}`}>{acc.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* ─── Font & Radius & Layout ───────────────────────── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                      {/* Font Family */}
+                      <div className="card-glass rounded-2xl p-4">
+                        <div className="flex items-center gap-1.5 mb-3">
+                          <Type size={10} className="text-white/40" />
+                          <p className="text-xs font-medium text-white/70">Font</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          {(Object.entries(FONT_FAMILIES) as [FontFamily, typeof FONT_FAMILIES[FontFamily]][]).map(([key, f]) => {
+                            const isActive = themeSettings.fontFamily === key;
+                            return (
+                              <button key={key} onClick={() => setFontFamily(key)}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all border ${
+                                  isActive ? 'bg-white/10 border-white/15 text-white/90' : 'border-transparent hover:bg-white/5 text-white/40'
+                                }`}
+                              >
+                                <span className="text-[10px]" style={{ fontFamily: f.css }}>{f.name}</span>
+                                {isActive && <Check size={8} className="text-white/60" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Border Radius & Dock & Sizes */}
+                      <div className="space-y-3">
+                        {/* Border Radius */}
+                        <div className="card-glass rounded-2xl p-4">
+                          <div className="flex items-center gap-1.5 mb-3">
+                            <MousePointer2 size={10} className="text-white/40" />
+                            <p className="text-xs font-medium text-white/70">Corner Style</p>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {(['sharp','default','rounded','pill'] as BorderRadius[]).map(r => (
+                              <button key={r} onClick={() => setBorderRadius(r)}
+                                className={`py-2 rounded-lg text-[8px] font-medium border transition-all capitalize ${
+                                  themeSettings.borderRadius === r ? 'bg-white/12 border-white/20 text-white/80' : 'border-white/6 text-white/30 hover:bg-white/5'
+                                }`}
+                              >{r}</button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Dock Position */}
+                        <div className="card-glass rounded-2xl p-4">
+                          <p className="text-xs font-medium text-white/70 mb-3">Dock Position</p>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(['bottom','left','right'] as DockPosition[]).map(pos => (
+                              <button key={pos} onClick={() => setDockPosition(pos)}
+                                className={`py-2 rounded-lg text-[8px] font-medium border transition-all capitalize ${
+                                  themeSettings.dockPosition === pos ? 'bg-white/12 border-white/20 text-white/80' : 'border-white/6 text-white/30 hover:bg-white/5'
+                                }`}
+                              >{pos}</button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Icon Size */}
+                        <div className="card-glass rounded-2xl p-4">
+                          <p className="text-xs font-medium text-white/70 mb-3">Icon Size</p>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(['small','medium','large'] as IconSize[]).map(size => (
+                              <button key={size} onClick={() => setIconSize(size)}
+                                className={`py-2 rounded-lg text-[8px] font-medium border transition-all capitalize ${
+                                  themeSettings.iconSize === size ? 'bg-white/12 border-white/20 text-white/80' : 'border-white/6 text-white/30 hover:bg-white/5'
+                                }`}
+                              >{size}</button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ─── Glass Blur & Animation ───────────────────────── */}
+                    <div className="card-glass rounded-2xl p-4">
+                      <div className="flex items-center gap-1.5 mb-4">
+                        <Sliders size={10} className="text-white/40" />
+                        <p className="text-xs font-medium text-white/70">Effects & Performance</p>
+                      </div>
+                      <div className="space-y-4">
+                        {/* Glass Blur */}
+                        <div>
+                          <div className="flex justify-between mb-2">
+                            <p className="text-[10px] text-white/60">Glass Blur Intensity</p>
+                            <span className="text-[10px] font-mono text-white/50">{themeSettings.glassBlur}px</span>
+                          </div>
+                          <input type="range" min="0" max="40" value={themeSettings.glassBlur}
+                            onChange={e => setGlassBlur(parseInt(e.target.value))}
+                            className="w-full accent-cyan-400 cursor-pointer" />
+                          <div className="flex justify-between text-[7px] text-white/20 mt-1">
+                            <span>None</span><span>Subtle</span><span>Heavy</span>
+                          </div>
+                        </div>
+                        {/* Animation Speed */}
+                        <div>
+                          <p className="text-[10px] text-white/60 mb-2">Animation Speed</p>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {(['off','slow','normal','fast'] as AnimationSpeed[]).map(s => (
+                              <button key={s} onClick={() => setAnimationSpeed(s)}
+                                className={`py-1.5 rounded-lg text-[8px] font-medium border transition-all capitalize ${
+                                  themeSettings.animationSpeed === s ? 'bg-white/12 border-white/20 text-white/80' : 'border-white/6 text-white/30 hover:bg-white/5'
+                                }`}
+                              >{s}</button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ─── Live Preview ─────────────────────────────────── */}
+                    <div className="card-glass rounded-2xl p-4">
+                      <p className="text-xs font-medium text-white/70 mb-3">Live Preview</p>
+                      <div className="relative rounded-xl overflow-hidden h-32" style={getWallpaperStyle()}>
+                        <div className="absolute inset-0" style={{
+                          background: 'rgba(0,0,0,0.35)',
+                          backdropFilter: `blur(${themeSettings.glassBlur / 2}px)`,
+                        }} />
+                        {/* Mini window */}
+                        <div className="absolute top-3 left-3 right-3 bottom-3 rounded-xl overflow-hidden border border-white/15"
+                          style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: `blur(${themeSettings.glassBlur}px)` }}>
+                          <div className="h-6 flex items-center px-3 gap-1.5 border-b border-white/10">
+                            <div className="w-2 h-2 rounded-full bg-red-400/80" />
+                            <div className="w-2 h-2 rounded-full bg-yellow-400/80" />
+                            <div className="w-2 h-2 rounded-full bg-green-400/80" />
+                            <span className="text-[8px] text-white/50 ml-1 font-medium">{currentThemeDef.name}</span>
+                          </div>
+                          <div className="p-2 flex gap-2 items-center">
+                            <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: currentAccent.value + '33' }}>
+                              <div className="w-2 h-2 rounded-sm" style={{ background: currentAccent.value }} />
+                            </div>
+                            <div className="flex-1">
+                              <div className="h-1.5 rounded-full w-3/4 mb-1" style={{ background: 'rgba(255,255,255,0.2)' }} />
+                              <div className="h-1 rounded-full w-1/2" style={{ background: 'rgba(255,255,255,0.1)' }} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 flex-wrap text-[8px] text-white/30">
+                        <span>Theme: <span className="text-white/50">{currentThemeDef.name}</span></span>
+                        <span>•</span>
+                        <span>Accent: <span style={{ color: currentAccent.value }}>{currentAccent.name}</span></span>
+                        <span>•</span>
+                        <span>Blur: <span className="text-white/50">{themeSettings.glassBlur}px</span></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {settingsTab === 'General' && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-light text-white/85 mb-4">General</h3>
@@ -3698,66 +4144,86 @@ export default function AethelisOS() {
         </div>
       )}
 
-      {/* Sovereign Wallpaper — Deep Space Nebula + Starfield + Aurora */}
+      {/* Wallpaper — Dynamic (controlled by ThemeContext) */}
       <div className="absolute inset-0 z-[-10] overflow-hidden pointer-events-none">
-        {/* Base gradient */}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, #050118 0%, #0a0420 35%, #080214 70%, #030010 100%)' }} />
+        {/* Base layer — from ThemeContext wallpaper selection */}
+        <div className="absolute inset-0 transition-all duration-1000" style={getWallpaperStyle()} />
+        {/* Dark overlay for readability when using custom/light wallpapers */}
+        <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.15)' }} />
 
-        {/* Aurora band — top */}
-        <div className="absolute -top-1/4 left-0 right-0 h-[60vh] opacity-40"
-          style={{
-            background: 'linear-gradient(120deg, transparent 0%, rgba(0,200,255,0.15) 30%, rgba(120,80,255,0.12) 60%, transparent 100%)',
-            filter: 'blur(80px)',
-            animation: 'float1 25s ease-in-out infinite',
+        {/* WIN11 BLOOM: Central radial burst — signature flower petal effect */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div style={{
+            width: '140vw', height: '140vw',
+            maxWidth: '1600px', maxHeight: '1600px',
+            background: `
+              radial-gradient(ellipse 60% 55% at 50% 52%, rgba(0,160,255,0.18) 0%, transparent 60%),
+              radial-gradient(ellipse 45% 40% at 38% 48%, rgba(80,200,255,0.12) 0%, transparent 55%),
+              radial-gradient(ellipse 45% 40% at 62% 48%, rgba(56,180,240,0.10) 0%, transparent 55%),
+              radial-gradient(ellipse 35% 50% at 50% 30%, rgba(20,140,255,0.16) 0%, transparent 50%),
+              radial-gradient(ellipse 35% 50% at 50% 74%, rgba(0,180,200,0.14) 0%, transparent 50%),
+              radial-gradient(ellipse 30% 40% at 25% 35%, rgba(100,80,255,0.09) 0%, transparent 50%),
+              radial-gradient(ellipse 30% 40% at 75% 65%, rgba(80,220,180,0.08) 0%, transparent 50%)
+            `,
+            filter: 'blur(60px)',
+            animation: 'float1 40s ease-in-out infinite',
+            opacity: 0.85,
           }} />
+        </div>
 
-        {/* Aurora band — bottom */}
-        <div className="absolute -bottom-1/4 left-0 right-0 h-[50vh] opacity-40"
-          style={{
-            background: 'linear-gradient(280deg, transparent 0%, rgba(180,60,255,0.12) 35%, rgba(0,220,200,0.10) 65%, transparent 100%)',
-            filter: 'blur(90px)',
-            animation: 'float2 30s ease-in-out infinite',
-          }} />
+        {/* MACOS BIG SUR: Aurora horizon glow — warm teal sweep across bottom 40% */}
+        <div className="absolute bottom-0 left-0 right-0 h-[55vh]" style={{
+          background: 'linear-gradient(0deg, rgba(0,180,180,0.12) 0%, rgba(20,140,200,0.09) 30%, rgba(40,100,200,0.06) 60%, transparent 100%)',
+          filter: 'blur(50px)',
+          animation: 'float2 35s ease-in-out infinite',
+        }} />
 
-        {/* Cyan orb — top left */}
-        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(34, 211, 238, 0.18) 0%, rgba(34, 211, 238, 0.06) 40%, transparent 70%)',
-            filter: 'blur(100px)',
-            animation: 'float1 20s ease-in-out infinite',
-          }} />
+        {/* macOS-style mountain silhouette layer */}
+        <div className="absolute bottom-0 left-0 right-0 h-[30vh]" style={{
+          background: 'linear-gradient(0deg, rgba(0,30,60,0.7) 0%, rgba(0,20,45,0.4) 50%, transparent 100%)',
+        }} />
 
-        {/* Magenta orb — bottom right */}
-        <div className="absolute -bottom-48 -right-48 w-[600px] h-[600px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 40%, transparent 70%)',
-            filter: 'blur(120px)',
-            animation: 'float2 25s ease-in-out infinite',
-          }} />
+        {/* WIN11: Left Bloom arm — electric blue */}
+        <div className="absolute -left-[15%] top-1/2 -translate-y-1/2 w-[55vw] h-[55vw] rounded-full" style={{
+          background: 'radial-gradient(circle, rgba(0,130,255,0.16) 0%, rgba(0,100,220,0.07) 40%, transparent 70%)',
+          filter: 'blur(80px)',
+          animation: 'float3 28s ease-in-out infinite',
+        }} />
 
-        {/* Emerald orb — center right accent */}
-        <div className="absolute top-1/4 right-1/4 w-[350px] h-[350px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(52, 211, 153, 0.10) 0%, rgba(52, 211, 153, 0.03) 50%, transparent 70%)',
-            filter: 'blur(90px)',
-            animation: 'float3 22s ease-in-out infinite',
-          }} />
+        {/* WIN11: Right Bloom arm — teal-cyan */}
+        <div className="absolute -right-[15%] top-1/2 -translate-y-1/2 w-[50vw] h-[50vw] rounded-full" style={{
+          background: 'radial-gradient(circle, rgba(0,200,210,0.13) 0%, rgba(0,160,180,0.06) 40%, transparent 70%)',
+          filter: 'blur(85px)',
+          animation: 'float2 32s ease-in-out infinite reverse',
+        }} />
 
-        {/* Secondary cyan orb */}
-        <div className="absolute top-1/2 left-1/3 w-[400px] h-[400px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(34, 211, 238, 0.10) 0%, transparent 60%)',
-            filter: 'blur(80px)',
-            animation: 'float3 30s ease-in-out infinite',
-          }} />
+        {/* MACOS: Aurora borealis sweep — top */}
+        <div className="absolute -top-[10%] left-0 right-0 h-[45vh]" style={{
+          background: 'linear-gradient(120deg, transparent 0%, rgba(0,180,255,0.10) 25%, rgba(80,100,255,0.08) 55%, rgba(0,200,180,0.06) 80%, transparent 100%)',
+          filter: 'blur(60px)',
+          animation: 'float1 30s ease-in-out infinite',
+        }} />
 
-        {/* Rose accent orb — bottom left */}
-        <div className="absolute bottom-1/4 -left-24 w-[300px] h-[300px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(244, 63, 94, 0.08) 0%, transparent 60%)',
-            filter: 'blur(70px)',
-            animation: 'float1 28s ease-in-out infinite reverse',
-          }} />
+        {/* WIN11: Accent spark — top right (coral/rose) */}
+        <div className="absolute -top-20 -right-20 w-[40vw] h-[40vw] rounded-full" style={{
+          background: 'radial-gradient(circle, rgba(255,80,120,0.07) 0%, rgba(200,60,100,0.03) 40%, transparent 65%)',
+          filter: 'blur(70px)',
+          animation: 'float3 38s ease-in-out infinite',
+        }} />
+
+        {/* MACOS: Soft purple depth — bottom left */}
+        <div className="absolute -bottom-20 -left-20 w-[45vw] h-[45vw] rounded-full" style={{
+          background: 'radial-gradient(circle, rgba(100,60,200,0.09) 0%, rgba(70,40,160,0.04) 40%, transparent 70%)',
+          filter: 'blur(90px)',
+          animation: 'float2 42s ease-in-out infinite reverse',
+        }} />
+
+        {/* CENTER BLOOM CORE: WIN11 bright nucleus */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30vw] h-[30vw] rounded-full" style={{
+          background: 'radial-gradient(circle, rgba(30,160,255,0.22) 0%, rgba(0,120,220,0.12) 30%, transparent 65%)',
+          filter: 'blur(55px)',
+          animation: 'float1 22s ease-in-out infinite',
+        }} />
 
         {/* Nebula layer */}
         <div className="absolute inset-0 wallpaper-nebula" />
@@ -3788,6 +4254,473 @@ export default function AethelisOS() {
         <div className="absolute inset-0"
           style={{ background: 'radial-gradient(ellipse at center, transparent 40%, rgba(3, 7, 18, 0.6) 100%)' }} />
       </div>
+
+      {/* ══════════════════════════════════════════════════════════
+           OS FACILITIES — Night Light, Hot Corners, Snap Zones,
+           Mission Control, Spotlight, Control Center,
+           Notification Center, App Switcher
+          ══════════════════════════════════════════════════════════ */}
+
+      {/* Night Light Overlay */}
+      {nightLight && (
+        <div className="fixed inset-0 z-[95] pointer-events-none"
+          style={{ background: `rgba(255, 160, 40, ${nightLightIntensity / 100})`, mixBlendMode: 'multiply' }} />
+      )}
+
+      {/* Snap Zone Indicator */}
+      {snapZone !== 'none' && (() => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const dockH = 70; const menuH = 36;
+        const workH = vh - menuH - dockH;
+        const zones: Record<typeof snapZone, React.CSSProperties> = {
+          none:  {},
+          left:  { left: 0, top: menuH, width: '50%', height: workH },
+          right: { left: '50%', top: menuH, width: '50%', height: workH },
+          top:   { left: 0, top: menuH, width: '100%', height: workH * 0.6 },
+          tl:    { left: 0, top: menuH, width: '50%', height: workH / 2 },
+          tr:    { left: '50%', top: menuH, width: '50%', height: workH / 2 },
+          bl:    { left: 0, top: menuH + workH / 2, width: '50%', height: workH / 2 },
+          br:    { left: '50%', top: menuH + workH / 2, width: '50%', height: workH / 2 },
+        };
+        return (
+          <div className="fixed z-[88] rounded-xl border-2 border-cyan-400/50 pointer-events-none transition-all duration-150"
+            style={{ ...zones[snapZone], background: 'rgba(34,211,238,0.08)', backdropFilter: 'blur(4px)' }} />
+        );
+      })()}
+
+      {/* Hot Corners — invisible trigger zones */}
+      {hotCornersEnabled && !isMobile && (
+        <>
+          {/* Top-left: Mission Control */}
+          <div className="fixed top-0 left-0 w-12 h-12 z-[89]"
+            onMouseEnter={() => { hotCornerTimerRef.current = setTimeout(() => setMissionControlOpen(true), 600); }}
+            onMouseLeave={() => { if (hotCornerTimerRef.current) clearTimeout(hotCornerTimerRef.current); }} />
+          {/* Top-right: Control Center */}
+          <div className="fixed top-0 right-0 w-12 h-12 z-[89]"
+            onMouseEnter={() => { hotCornerTimerRef.current = setTimeout(() => setControlCenterOpen(true), 600); }}
+            onMouseLeave={() => { if (hotCornerTimerRef.current) clearTimeout(hotCornerTimerRef.current); }} />
+          {/* Bottom-left: Launchpad */}
+          <div className="fixed bottom-0 left-0 w-12 h-12 z-[89]"
+            onMouseEnter={() => { hotCornerTimerRef.current = setTimeout(() => setLaunchpadOpen(true), 600); }}
+            onMouseLeave={() => { if (hotCornerTimerRef.current) clearTimeout(hotCornerTimerRef.current); }} />
+          {/* Bottom-right: Notification Center */}
+          <div className="fixed bottom-0 right-0 w-12 h-12 z-[89]"
+            onMouseEnter={() => { hotCornerTimerRef.current = setTimeout(() => setNotifCenterOpen(true), 600); }}
+            onMouseLeave={() => { if (hotCornerTimerRef.current) clearTimeout(hotCornerTimerRef.current); }} />
+        </>
+      )}
+
+      {/* ── MISSION CONTROL ────────────────────────────────────── */}
+      {missionControlOpen && (
+        <div className="fixed inset-0 z-[92] flex flex-col" onClick={() => setMissionControlOpen(false)}
+          style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)' }}>
+
+          {/* Spaces / Virtual Desktops bar */}
+          <div className="flex items-center gap-3 px-8 pt-6 pb-4" onClick={e=>e.stopPropagation()}>
+            <span className="text-[10px] text-white/30 uppercase tracking-widest mr-2">Spaces</span>
+            {desktops.map((desk, i) => (
+              <button key={desk.id} onClick={() => setCurrentDesktop(i)}
+                className={`px-4 py-1.5 rounded-lg text-[10px] font-medium border transition-all ${
+                  i === currentDesktop ? 'bg-white/15 border-white/25 text-white' : 'border-white/10 text-white/40 hover:bg-white/8'
+                }`}>{desk.name}</button>
+            ))}
+            <button
+              onClick={() => setDesktops(p => [...p, { id: `d${p.length+1}`, name: `Desktop ${p.length+1}` }])}
+              className="w-6 h-6 rounded-lg border border-dashed border-white/20 flex items-center justify-center text-white/30 hover:border-white/40 hover:text-white/60 transition-all text-sm"
+            >+</button>
+          </div>
+
+          {/* Window thumbnails */}
+          <div className="flex-1 px-6 pb-6 overflow-auto" onClick={e=>e.stopPropagation()}>
+            {windows.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 text-white/20">
+                <Monitor size={48} />
+                <p className="text-sm">No open windows</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-fr">
+                {windows.map(win => {
+                  const WI = win.icon;
+                  const isMinimized = minimized.includes(win.id);
+                  return (
+                    <button key={win.id}
+                      onClick={() => {
+                        if (isMinimized) setMinimized(p => p.filter(id => id !== win.id));
+                        bringToFront(win.id);
+                        setMissionControlOpen(false);
+                      }}
+                      className={`group relative rounded-2xl border overflow-hidden transition-all duration-200 hover:scale-[1.03] hover:shadow-2xl ${
+                        activeWindowId === win.id ? 'border-white/30 ring-1 ring-white/20' : 'border-white/10 hover:border-white/20'
+                      } ${isMinimized ? 'opacity-50' : ''}`}
+                      style={{ background: 'rgba(255,255,255,0.07)', aspectRatio: '16/10' }}
+                    >
+                      {/* Window chrome */}
+                      <div className="absolute inset-0 flex flex-col">
+                        <div className="h-6 flex items-center gap-1.5 px-2 border-b border-white/10"
+                          style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <div className="w-2 h-2 rounded-full bg-red-400/70" />
+                          <div className="w-2 h-2 rounded-full bg-yellow-400/70" />
+                          <div className="w-2 h-2 rounded-full bg-green-400/70" />
+                          <span className="text-[7px] text-white/40 ml-1 truncate">{win.title}</span>
+                        </div>
+                        <div className={`flex-1 flex items-center justify-center bg-gradient-to-br ${win.gradient} opacity-20`} />
+                        <div className="absolute inset-0 flex items-center justify-center pt-6">
+                          <WI size={28} className="text-white/30" />
+                        </div>
+                      </div>
+                      {/* Hover overlay */}
+                      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
+                        <span className="text-[9px] text-white/80 font-medium bg-black/40 px-2 py-0.5 rounded-full">{win.title}</span>
+                        {isMinimized && <span className="text-[7px] text-amber-400/80 ml-1">(min)</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <p className="text-center text-white/20 text-[9px] pb-4 tracking-wider">CLICK OUTSIDE TO CLOSE · CMD+M</p>
+        </div>
+      )}
+
+      {/* ── SPOTLIGHT ─────────────────────────────────────────── */}
+      {spotlightOpen && (() => {
+        const allApps = Object.values(APPS);
+        const q = spotlightQuery.toLowerCase().trim();
+        const results = q === '' ? allApps.slice(0, 8) : allApps.filter(a =>
+          a.title.toLowerCase().includes(q) || a.desc.toLowerCase().includes(q)
+        );
+        return (
+          <div className="fixed inset-0 z-[93] flex items-start justify-center pt-[15vh]"
+            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(20px)' }}
+            onClick={() => { setSpotlightOpen(false); setSpotlightQuery(''); }}>
+            <div className="w-full max-w-lg mx-4" onClick={e=>e.stopPropagation()}>
+              {/* Search input */}
+              <div className="flex items-center gap-3 px-4 py-3 rounded-2xl mb-2"
+                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(40px)' }}>
+                <Search size={18} className="text-white/50 shrink-0" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Spotlight Search..."
+                  value={spotlightQuery}
+                  onChange={e => setSpotlightQuery(e.target.value)}
+                  className="flex-1 bg-transparent text-white text-base placeholder-white/30 outline-none"
+                />
+                {spotlightQuery && (
+                  <button onClick={() => setSpotlightQuery('')} className="text-white/30 hover:text-white/60 transition-colors">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Results */}
+              {results.length > 0 && (
+                <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(10,14,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(40px)' }}>
+                  {q === '' && <p className="text-[8px] text-white/25 uppercase tracking-widest px-4 pt-3 pb-1">Applications</p>}
+                  {results.map(app => {
+                    const AI = app.icon;
+                    return (
+                      <button key={app.id}
+                        onClick={() => { openApp(app); setSpotlightOpen(false); setSpotlightQuery(''); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/8 transition-colors text-left">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br ${app.gradient} shrink-0`}>
+                          <AI size={14} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white/90 font-medium leading-tight">{app.title}</p>
+                          <p className="text-[9px] text-white/35 truncate">{app.desc}</p>
+                        </div>
+                        <ChevronRight size={12} className="text-white/20 shrink-0" />
+                      </button>
+                    );
+                  })}
+                  {q !== '' && results.length === 0 && (
+                    <p className="text-sm text-white/30 text-center py-6">No results for "{spotlightQuery}"</p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-center text-white/20 text-[9px] mt-3">CMD+SPACE to toggle · ESC to close</p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── CONTROL CENTER ────────────────────────────────────── */}
+      {controlCenterOpen && (
+        <div className="fixed inset-0 z-[92]" onClick={() => setControlCenterOpen(false)}>
+          <div data-panel="control-center" className="absolute top-9 right-4 w-80 rounded-2xl p-3 space-y-2 shadow-2xl"
+            style={{ background: 'rgba(20,25,45,0.90)', border: '1px solid rgba(255,255,255,0.14)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' }}
+            onClick={e=>e.stopPropagation()}>
+
+            {/* Quick Toggles Grid */}
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { icon: Wifi, label: 'WiFi', on: true, color: 'bg-sky-500' },
+                { icon: Bell, label: dndMode ? 'DND On' : 'DND', on: dndMode, color: 'bg-violet-500', action: () => setDndMode(p => !p) },
+                { icon: Moon, label: focusMode ? 'Focus' : 'Focus', on: focusMode, color: 'bg-indigo-500', action: () => setFocusMode(p => !p) },
+                { icon: Sun, label: nightLight ? 'Night' : 'Night', on: nightLight, color: 'bg-amber-500', action: () => setNightLight(p => !p) },
+              ].map(item => {
+                const II = item.icon;
+                return (
+                  <button key={item.label}
+                    onClick={item.action}
+                    className={`flex flex-col items-center gap-1.5 p-2.5 rounded-xl transition-all border ${
+                      item.on ? `${item.color} border-white/20 text-white` : 'bg-white/8 border-white/8 text-white/50 hover:bg-white/12'
+                    }`}>
+                    <II size={16} />
+                    <span className="text-[8px] font-medium leading-none">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Brightness */}
+            <div className="card-glass rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Sun size={11} className="text-white/40" />
+                <span className="text-[10px] text-white/50">Brightness</span>
+                <span className="text-[10px] text-white/70 ml-auto font-mono">{brightness}%</span>
+              </div>
+              <input type="range" min="20" max="100" value={brightness} onChange={e=>setBrightness(+e.target.value)}
+                className="w-full cursor-pointer" />
+            </div>
+
+            {/* Volume */}
+            <div className="card-glass rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Volume2 size={11} className="text-white/40" />
+                <span className="text-[10px] text-white/50">Volume</span>
+                <span className="text-[10px] text-white/70 ml-auto font-mono">{volume}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={volume} onChange={e=>setVolume(+e.target.value)}
+                className="w-full cursor-pointer" />
+            </div>
+
+            {/* Night Light intensity (if on) */}
+            {nightLight && (
+              <div className="card-glass rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sun size={11} className="text-amber-400/70" />
+                  <span className="text-[10px] text-white/50">Night Light</span>
+                  <span className="text-[10px] text-amber-400/70 ml-auto font-mono">{nightLightIntensity}%</span>
+                </div>
+                <input type="range" min="5" max="80" value={nightLightIntensity} onChange={e=>setNightLightIntensity(+e.target.value)}
+                  className="w-full cursor-pointer" style={{ accentColor: '#fbbf24' }} />
+              </div>
+            )}
+
+            {/* System stats */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'CPU', value: `${stats.cpu.toFixed(0)}%`, icon: Cpu, color: 'text-sky-400' },
+                { label: 'RAM', value: `${stats.ram.toFixed(0)}%`, icon: HardDrive, color: 'text-violet-400' },
+                { label: 'NET', value: `${(stats.netRx/1024).toFixed(0)}KB`, icon: Wifi, color: 'text-emerald-400' },
+              ].map(s => {
+                const SI = s.icon;
+                return (
+                  <div key={s.label} className="card-glass rounded-xl p-2 flex flex-col items-center gap-1">
+                    <SI size={12} className={s.color} />
+                    <span className={`text-xs font-mono ${s.color}`}>{s.value}</span>
+                    <span className="text-[7px] uppercase text-white/25">{s.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* OS Theme quick switch */}
+            <div className="card-glass rounded-xl p-3">
+              <p className="text-[9px] text-white/30 uppercase tracking-wider mb-2">Quick Theme</p>
+              <div className="flex gap-1.5">
+                {(['aethelis','windows11','macos','ios','android','samsung'] as OSThemeId[]).map(id => {
+                  const t = OS_THEMES[id];
+                  const isActive = themeSettings.osTheme === id;
+                  return (
+                    <button key={id} onClick={() => applyThemePreset(id)} title={t.name}
+                      className={`flex-1 h-6 rounded-md border transition-all ${isActive ? 'border-white/30' : 'border-transparent hover:border-white/15'}`}
+                      style={{ background: t.preview }} />
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Mission Control shortcut */}
+            <button onClick={() => { setMissionControlOpen(true); setControlCenterOpen(false); }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 text-white/60 hover:text-white/80 transition-all text-[10px]">
+              <Layers size={12} />
+              <span>Mission Control</span>
+              <span className="ml-auto text-white/25 font-mono">⌘M</span>
+            </button>
+
+            <button onClick={() => { setSpotlightOpen(true); setControlCenterOpen(false); }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 text-white/60 hover:text-white/80 transition-all text-[10px]">
+              <Search size={12} />
+              <span>Spotlight Search</span>
+              <span className="ml-auto text-white/25 font-mono">⌘Space</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── NOTIFICATION CENTER ───────────────────────────────── */}
+      {notifCenterOpen && (
+        <div className="fixed inset-0 z-[92]" onClick={() => setNotifCenterOpen(false)}>
+          <div data-panel="notif-center" className="absolute top-0 right-0 bottom-0 w-80 shadow-2xl flex flex-col"
+            style={{ background: 'rgba(8,12,24,0.92)', borderLeft: '1px solid rgba(255,255,255,0.10)', backdropFilter: 'blur(40px)' }}
+            onClick={e=>e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+              <div>
+                <h3 className="text-sm font-semibold text-white/90">Notification Center</h3>
+                <p className="text-[9px] text-white/30">{events.length} events</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setDndMode(p => !p)}
+                  className={`px-2 py-1 rounded-lg text-[9px] border transition-all ${dndMode ? 'bg-violet-500/20 border-violet-500/30 text-violet-300' : 'border-white/10 text-white/40 hover:bg-white/5'}`}>
+                  {dndMode ? 'DND On' : 'DND Off'}
+                </button>
+                <button onClick={() => setNotifCenterOpen(false)} className="text-white/30 hover:text-white/60 transition-colors">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Date/time widget */}
+            <div className="px-5 py-4 border-b border-white/[0.06] text-center">
+              <p className="text-3xl font-extralight font-mono text-white/85">{time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</p>
+              <p className="text-xs text-white/30 mt-0.5">{time.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})}</p>
+            </div>
+
+            {/* Quick toggles */}
+            <div className="px-4 py-3 border-b border-white/[0.06]">
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { icon: Wifi, label: 'WiFi', on: true, color: 'bg-sky-500', action: undefined },
+                  { icon: Bell, label: 'DND', on: dndMode, color: 'bg-violet-500', action: () => setDndMode(p => !p) },
+                  { icon: Moon, label: 'Focus', on: focusMode, color: 'bg-indigo-500', action: () => setFocusMode(p => !p) },
+                  { icon: Sun, label: 'Night', on: nightLight, color: 'bg-amber-500', action: () => setNightLight(p => !p) },
+                ].map(item => {
+                  const II = item.icon;
+                  return (
+                    <button key={item.label} onClick={item.action}
+                      className={`flex flex-col items-center gap-1 py-2 rounded-xl border text-[7px] transition-all ${item.on ? `${item.color} border-white/20 text-white` : 'bg-white/6 border-white/6 text-white/40'}`}>
+                      <II size={13} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Notification list */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+              {events.length === 0 ? (
+                <div className="h-32 flex flex-col items-center justify-center gap-2 text-white/20">
+                  <Bell size={28} />
+                  <p className="text-xs">No notifications</p>
+                </div>
+              ) : (
+                events.slice(0, 30).map(ev => {
+                  const colorMap: Record<string,'string'> = { info: 'text-sky-400', warn: 'text-amber-400', critical: 'text-red-400' };
+                  return (
+                    <div key={ev.id} className="card-glass rounded-xl p-3">
+                      <div className="flex items-start gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${ev.severity === 'critical' ? 'bg-red-400' : ev.severity === 'warn' ? 'bg-amber-400' : 'bg-sky-400'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] text-white/80 leading-snug">{ev.message}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[8px] text-white/30 font-mono">{ev.category}</span>
+                            <span className={`text-[7px] uppercase ${colorMap[ev.severity] || 'text-white/30'}`}>{ev.severity}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {events.length > 0 && (
+              <div className="px-4 py-3 border-t border-white/[0.06]">
+                <button onClick={() => setEvents([])}
+                  className="w-full py-2 rounded-xl text-[10px] text-white/40 hover:text-white/70 hover:bg-white/5 border border-transparent hover:border-white/10 transition-all">
+                  Clear All Notifications
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── APP SWITCHER (Cmd+Tab) ────────────────────────────── */}
+      {appSwitcherOpen && (() => {
+        const openWins = windows.filter(w => !minimized.includes(w.id));
+        return (
+          <div className="fixed inset-0 z-[96] flex items-center justify-center pointer-events-none">
+            <div data-panel="app-switcher" className="flex items-center gap-3 px-4 py-3 rounded-2xl pointer-events-auto"
+              style={{ background: 'rgba(10,15,30,0.88)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(40px)' }}>
+              {openWins.length === 0 ? (
+                <span className="text-xs text-white/40 px-4">No open windows</span>
+              ) : (
+                openWins.map((win, i) => {
+                  const WI = win.icon;
+                  return (
+                    <button key={win.id}
+                      onClick={() => { bringToFront(win.id); setAppSwitcherOpen(false); setAppSwitcherIdx(0); }}
+                      className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all ${
+                        i === appSwitcherIdx ? 'bg-white/15 ring-1 ring-white/25 scale-110' : 'hover:bg-white/8'
+                      }`}>
+                      <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${win.gradient} flex items-center justify-center`}>
+                        <WI size={22} className="text-white" />
+                      </div>
+                      <span className={`text-[8px] max-w-[56px] truncate text-center ${i === appSwitcherIdx ? 'text-white/90' : 'text-white/40'}`}>{win.title}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PIP (Picture-in-Picture) window ──────────────────── */}
+      {pipWindowId && (() => {
+        const win = windows.find(w => w.id === pipWindowId);
+        if (!win) return null;
+        const WI = win.icon;
+        return (
+          <div className="fixed bottom-24 right-4 z-[91] w-64 h-40 rounded-2xl overflow-hidden shadow-2xl border border-white/15 group"
+            style={{ background: 'rgba(8,12,24,0.95)', backdropFilter: 'blur(20px)' }}>
+            <div className="absolute inset-0 flex flex-col">
+              <div className="h-7 flex items-center px-3 gap-2 border-b border-white/8"
+                style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <div className={`w-4 h-4 rounded-md bg-gradient-to-br ${win.gradient} flex items-center justify-center`}>
+                  <WI size={8} className="text-white" />
+                </div>
+                <span className="text-[9px] text-white/60 flex-1 truncate">{win.title}</span>
+                <button onClick={() => setPipWindowId(null)} className="text-white/30 hover:text-white/70 transition-colors">
+                  <X size={10} />
+                </button>
+              </div>
+              <div className={`flex-1 flex items-center justify-center bg-gradient-to-br ${win.gradient} opacity-10`} />
+              <div className="absolute inset-0 top-7 flex items-center justify-center">
+                <WI size={32} className="text-white/20" />
+              </div>
+            </div>
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              style={{ background: 'rgba(0,0,0,0.3)' }}>
+              <button onClick={() => { if (minimized.includes(win.id)) setMinimized(p => p.filter(id => id !== win.id)); bringToFront(win.id); setPipWindowId(null); }}
+                className="px-4 py-1.5 rounded-lg bg-white/15 border border-white/20 text-white text-[10px] font-medium hover:bg-white/25 transition-all">
+                Open
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Menu Bar - Desktop: Full telemetry | Mobile: Minimal */}
       {isMobile ? (
@@ -3862,64 +4795,164 @@ export default function AethelisOS() {
             <span className="font-mono text-violet-400 bg-violet-400/10 px-1.5 py-0.5 rounded text-[9px]">
               RAM {stats.ram.toFixed(0)}%
             </span>
+            {/* OS Facility quick-access icons */}
+            <button onClick={() => setMissionControlOpen(p => !p)} title="Mission Control (⌘M)"
+              className={`p-1 rounded-md transition-all ${missionControlOpen ? 'text-cyan-400 bg-cyan-400/10' : 'text-white/40 hover:text-white/70'}`}>
+              <Layers size={12} />
+            </button>
+            <button onClick={() => { setSpotlightOpen(p => !p); setSpotlightQuery(''); }} title="Spotlight (⌘Space)"
+              className={`p-1 rounded-md transition-all ${spotlightOpen ? 'text-white bg-white/15' : 'text-white/40 hover:text-white/70'}`}>
+              <Search size={12} />
+            </button>
+            {dndMode && (
+              <span className="text-violet-400 bg-violet-400/10 px-1.5 py-0.5 rounded text-[9px] font-mono">DND</span>
+            )}
+            {nightLight && (
+              <span className="text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded text-[9px] font-mono">🌙</span>
+            )}
             <Cpu size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
             <Wifi size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
             <Battery size={12} className="text-white/40 hover:text-white/70 cursor-pointer transition-colors"/>
-            <span className="font-semibold text-white/90 tabular-nums text-xs">{time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+            {/* Time — click to open Notification Center */}
+            <button onClick={() => setNotifCenterOpen(p => !p)} title="Notification Center"
+              className={`font-semibold tabular-nums text-xs transition-colors ${notifCenterOpen ? 'text-cyan-400' : 'text-white/90 hover:text-white'}`}>
+              {time.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+            </button>
+            {/* Control Center */}
+            <button onClick={() => setControlCenterOpen(p => !p)} title="Control Center"
+              className={`p-1 rounded-md transition-all ${controlCenterOpen ? 'text-white bg-white/15' : 'text-white/40 hover:text-white/70'}`}>
+              <Sliders size={12} />
+            </button>
           </div>
         </div>
       )}
 
       {/* Launchpad - Phase 14: Five Spheres of Totality */}
-      {launchpadOpen && (
-        <div className="fixed inset-0 z-[90] flex flex-col items-center justify-start pt-8 sm:pt-12 p-4 sm:p-8 overflow-y-auto" style={{ background: 'radial-gradient(ellipse at center, rgba(13,22,39,0.95) 0%, rgba(5,8,17,0.98) 100%)' }} onClick={() => setLaunchpadOpen(false)}>
-          {/* Title */}
-          <div className="text-center mb-6" onClick={e=>e.stopPropagation()}>
-            <h2 className="text-2xl sm:text-3xl font-light tracking-widest text-white/90 mb-1">SOVEREIGN OPERATIONS</h2>
-            <p className="text-[10px] text-white/40 uppercase tracking-wider">The Five Spheres of Totality</p>
-          </div>
+      {launchpadOpen && (() => {
+        const allApps = Object.values(APPS);
+        const filteredApps = allApps.filter(app => {
+          const matchesCategory = launchpadCategory === 'all' || app.sphere === launchpadCategory;
+          const matchesSearch = !launchpadSearch.trim() ||
+            app.title.toLowerCase().includes(launchpadSearch.toLowerCase()) ||
+            app.desc.toLowerCase().includes(launchpadSearch.toLowerCase());
+          return matchesCategory && matchesSearch;
+        });
 
-          {/* Five Spheres Grid */}
-          <div className="w-full max-w-4xl space-y-4 sm:space-y-6 overflow-y-auto" onClick={e=>e.stopPropagation()}>
-            {(Object.keys(SPHERES) as SphereKey[]).map(sphereKey => {
-              const sphere = SPHERES[sphereKey];
-              const sphereApps = Object.values(APPS).filter(app => app.sphere === sphereKey);
-              if (sphereApps.length === 0) return null;
+        const LAUNCHPAD_CATEGORIES: Array<{ key: 'all' | SphereKey; label: string; color: string }> = [
+          { key: 'all',      label: 'All Apps',     color: 'text-white' },
+          { key: 'CORE',     label: 'System',       color: 'text-cyan-400' },
+          { key: 'INTEL',    label: 'Intelligence', color: 'text-violet-400' },
+          { key: 'RESOURCE', label: 'Operations',   color: 'text-emerald-400' },
+          { key: 'WEALTH',   label: 'Finance',      color: 'text-amber-400' },
+          { key: 'SECURITY', label: 'Security',     color: 'text-rose-400' },
+        ];
 
-              return (
-                <div key={sphereKey} className={`card-glass rounded-2xl p-4 sm:p-5 border ${sphere.border} transition-all duration-300 hover:border-opacity-50`}>
-                  {/* Sphere Header */}
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className={`w-2 h-2 rounded-full ${sphere.color.replace('text-', 'bg-')} animate-pulse`} />
-                    <h3 className={`text-xs sm:text-sm font-semibold tracking-wider uppercase ${sphere.color}`}>
-                      {sphere.name}
-                    </h3>
-                    <span className="text-[9px] text-white/30 ml-auto">{sphere.desc}</span>
+        return (
+          <div
+            className="fixed inset-0 z-[90] flex flex-col"
+            style={{ background: 'rgba(2, 6, 18, 0.82)', backdropFilter: 'blur(50px)', WebkitBackdropFilter: 'blur(50px)' }}
+            onClick={() => { setLaunchpadOpen(false); setLaunchpadSearch(''); setLaunchpadCategory('all'); }}
+          >
+            {/* Header */}
+            <div className="flex-shrink-0 flex flex-col items-center pt-10 sm:pt-14 pb-4 px-6 gap-4" onClick={e => e.stopPropagation()}>
+
+              {/* Title */}
+              <div className="text-center">
+                <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-white/95">App Library</h2>
+                <p className="text-[10px] text-white/35 tracking-widest uppercase mt-0.5">Aethelis Sovereign OS</p>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative w-full max-w-sm">
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/35 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search apps..."
+                  value={launchpadSearch}
+                  onChange={e => setLaunchpadSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm text-white/90 placeholder-white/30 outline-none focus:ring-1 focus:ring-cyan-500/50"
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  autoFocus
+                />
+              </div>
+
+              {/* Category Pills */}
+              <div className="flex flex-wrap justify-center gap-1.5">
+                {LAUNCHPAD_CATEGORIES.map(cat => (
+                  <button
+                    key={cat.key}
+                    onClick={() => setLaunchpadCategory(cat.key)}
+                    className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all duration-200 ${
+                      launchpadCategory === cat.key
+                        ? `${cat.color} bg-white/15 border border-white/20`
+                        : 'text-white/40 hover:text-white/70 hover:bg-white/8'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* App Grid */}
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-2" onClick={e => e.stopPropagation()}>
+              <div className="max-w-3xl mx-auto">
+                {filteredApps.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-40 gap-3 text-white/30">
+                    <Search size={32} />
+                    <p className="text-sm">No apps match "{launchpadSearch}"</p>
                   </div>
-
-                  {/* Apps in Sphere */}
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4">
-                    {sphereApps.map(app => {
+                ) : (
+                  <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 gap-x-4 gap-y-6 py-4">
+                    {filteredApps.map((app, i) => {
                       const AI = app.icon;
                       return (
-                        <div key={app.id} onClick={()=>openApp(app)} className="flex flex-col items-center gap-2 cursor-pointer group transition-all duration-300 hover:scale-105">
-                          <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shadow-lg transition-all duration-300 group-hover:shadow-xl bg-gradient-to-br ${app.gradient} text-white border border-white/15`}>
-                            <AI size={22} className="group-hover:scale-110 transition-transform duration-300"/>
+                        <button
+                          key={app.id}
+                          onClick={() => { openApp(app); setLaunchpadOpen(false); setLaunchpadSearch(''); setLaunchpadCategory('all'); }}
+                          className="flex flex-col items-center gap-2 group cursor-pointer"
+                          style={{ animation: `appIconZoom 0.35s cubic-bezier(0.16,1,0.3,1) ${i * 25}ms both` }}
+                        >
+                          <div
+                            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-[18px] sm:rounded-[20px] flex items-center justify-center shadow-xl transition-all duration-300 group-hover:scale-110 group-hover:shadow-2xl bg-gradient-to-br ${app.gradient} text-white`}
+                            style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.2)' }}
+                          >
+                            <AI size={isMobile ? 22 : 26} />
                           </div>
-                          <span className="text-[8px] sm:text-[10px] font-medium text-white/70 group-hover:text-white/90 text-center leading-tight transition-colors duration-300">{app.title}</span>
-                        </div>
+                          <span className="text-[9px] sm:text-[10px] font-medium text-white/60 group-hover:text-white/90 text-center leading-tight transition-colors duration-200 max-w-[64px] line-clamp-2">
+                            {app.title}
+                          </span>
+                        </button>
                       );
                     })}
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                )}
+              </div>
+            </div>
 
-          {/* Close hint */}
-          <p className="mt-6 sm:mt-10 text-white/30 text-[10px] sm:text-[11px]">Tap anywhere to close</p>
-        </div>
-      )}
+            {/* Footer */}
+            <div className="flex-shrink-0 flex items-center justify-center gap-8 py-4 px-6" onClick={e => e.stopPropagation()}>
+              {(Object.keys(SPHERES) as SphereKey[]).map(key => {
+                const s = SPHERES[key];
+                const count = Object.values(APPS).filter(a => a.sphere === key).length;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setLaunchpadCategory(launchpadCategory === key ? 'all' : key)}
+                    className={`flex flex-col items-center gap-1 transition-all duration-200 ${launchpadCategory === key ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
+                  >
+                    <div className={`w-2 h-2 rounded-full ${s.dot}`} />
+                    <span className={`text-[8px] uppercase tracking-widest ${s.color}`}>{s.name}</span>
+                    <span className="text-[7px] text-white/25">{count} apps</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-center text-white/20 text-[9px] pb-safe pb-3 tracking-wider">CLICK OUTSIDE TO CLOSE</p>
+          </div>
+        );
+      })()}
 
       {/* Desktop / Window Container */}
       <div className={`flex-1 relative overflow-hidden z-10 ${isMobile ? 'pb-16' : ''}`}>
@@ -4053,7 +5086,61 @@ export default function AethelisOS() {
                   <WI size={isMobile ? 16 : 11} className={win.color}/> {win.title}
                 </div>
 
-                <div className={isMobile ? 'w-16' : 'w-[60px]'}></div>
+                {/* Titlebar right: PiP + snap hints */}
+                <div className={`flex items-center gap-1 ${isMobile ? 'w-16 justify-end' : 'w-[60px] justify-end'}`}>
+                  {!isMobile && (
+                    <>
+                      {/* PiP toggle */}
+                      <button
+                        onClick={e=>{e.stopPropagation(); setPipWindowId(p => p === win.id ? null : win.id); toggleMinimize(win.id);}}
+                        title="Picture-in-Picture"
+                        className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-white/60 transition-all"
+                      >
+                        <Play size={8} />
+                      </button>
+                      {/* Snap layout popover on hover */}
+                      <div className="relative group/snap">
+                        <button className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-white/60 transition-all">
+                          <Layers size={8} />
+                        </button>
+                        <div className="absolute right-0 top-6 w-28 p-2 rounded-xl border border-white/15 shadow-xl opacity-0 pointer-events-none group-hover/snap:opacity-100 group-hover/snap:pointer-events-auto transition-all z-50"
+                          style={{ background: 'rgba(10,14,28,0.95)', backdropFilter: 'blur(20px)' }}>
+                          <p className="text-[7px] text-white/30 uppercase tracking-wider mb-1.5">Snap</p>
+                          <div className="grid grid-cols-2 gap-1">
+                            {([
+                              { key: 'left' as const, label: 'Left ½', icon: '▐' },
+                              { key: 'right' as const, label: 'Right ½', icon: '▌' },
+                              { key: 'tl' as const, label: '↖ ¼', icon: '◤' },
+                              { key: 'tr' as const, label: '↗ ¼', icon: '◥' },
+                              { key: 'bl' as const, label: '↙ ¼', icon: '◣' },
+                              { key: 'br' as const, label: '↘ ¼', icon: '◢' },
+                            ]).map(zone => {
+                              const vw = window.innerWidth;
+                              const vh = window.innerHeight;
+                              const dockH = 70; const menuH = 36;
+                              const workH = vh - menuH - dockH;
+                              const sl: Record<typeof zone.key, {x:number;y:number;w:number;h:number}> = {
+                                left:  {x:0, y:menuH, w:vw/2, h:workH},
+                                right: {x:vw/2, y:menuH, w:vw/2, h:workH},
+                                tl:    {x:0, y:menuH, w:vw/2, h:workH/2},
+                                tr:    {x:vw/2, y:menuH, w:vw/2, h:workH/2},
+                                bl:    {x:0, y:menuH+workH/2, w:vw/2, h:workH/2},
+                                br:    {x:vw/2, y:menuH+workH/2, w:vw/2, h:workH/2},
+                              };
+                              return (
+                                <button key={zone.key}
+                                  onClick={e=>{e.stopPropagation(); const s = sl[zone.key]; setWindows(p=>p.map(w=>w.id===win.id?{...w,x:s.x,y:s.y,width:s.w,height:s.h,isMaximized:false}:w));}}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] text-white/50 hover:text-white/90 hover:bg-white/10 border border-transparent hover:border-white/10 transition-all">
+                                  <span>{zone.icon}</span><span>{zone.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Content */}
