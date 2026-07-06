@@ -14,10 +14,14 @@ import {
   Clock, Calendar, Mail, MessageSquare, AlertTriangle,
   BookOpen, Sparkles, Send, Compass, Target, Crosshair,
   Brain, Timer, Network as NetworkIcon, ChevronDown,
-  Sliders, Check, RotateCcw, Wallpaper, Type, MousePointer2
+  Sliders, Check, RotateCcw, Wallpaper, Type, MousePointer2,
+  MessageCircle
 } from 'lucide-react';
 import { useTheme, OS_THEMES, WALLPAPERS, ACCENT_COLORS, FONT_FAMILIES } from './contexts/ThemeContext';
 import type { OSThemeId, WallpaperId, AccentColor, FontFamily, DockPosition, BorderRadius, AnimationSpeed, IconSize } from './contexts/ThemeContext';
+import ELSXApp from './components/apps/ELSXApp';
+import OmniStoreApp from './components/apps/OmniStoreApp';
+import AetherLifeApp from './components/apps/AetherLifeApp';
 import { supabase } from './lib/supabase';
 import type {
   LedgerTransaction, LogisticsOrder, MarketModule, SystemEvent,
@@ -88,6 +92,7 @@ const APPS: Record<string, AppConfig & { sphere: SphereKey }> = {
 
   // Sphere IV: Private Wealth
   LEDGER:    { id: 'ledger',    title: 'Sovereign Ledger',  icon: Coins,       color: 'text-amber-400',  bg: 'bg-amber-500',  gradient: 'from-amber-400 to-orange-600', desc: 'Decentralized economy', sphere: 'WEALTH' },
+  AETHER_LIFE: { id: 'aether-life', title: 'Aether-Life',   icon: MessageCircle, color: 'text-pink-400',  bg: 'bg-pink-500', gradient: 'from-pink-500 to-rose-600', desc: 'Encrypted social network', sphere: 'WEALTH' },
 
   // Sphere V: Zero-Trust Security
   VAULT:     { id: 'vault',     title: 'Bio-Pulse Vault',  icon: Fingerprint, color: 'text-violet-400', bg: 'bg-violet-700', gradient: 'from-violet-600 to-fuchsia-700', desc: 'Biometric archives', sphere: 'SECURITY' },
@@ -102,6 +107,7 @@ const APP_NEON_BORDERS: Record<string, string> = {
   enterprise: 'border-t-violet-500/50',
   market: 'border-t-emerald-500/50',
   ledger: 'border-t-amber-500/50',
+  'aether-life': 'border-t-pink-500/50',
   oracle: 'border-t-purple-500/50',
   emulator: 'border-t-cyan-400/50',
   nexus: 'border-t-red-500/50',
@@ -379,6 +385,7 @@ export default function AethelisOS() {
   const [modules,    setModules]    = useState<MarketModule[]>([]);
   const [dbLoading,  setDbLoading]  = useState(true);
   const [dbError,    setDbError]    = useState(false);
+  const [installedApps, setInstalledApps] = useState<string[]>(['elsx-enterprise', 'sovereign-ledger', 'qbit-oracle', 'wp-backbone', 'bio-vault']);
   const [isBooting,  setIsBooting]  = useState(true);
 
   // Phase 5 persistence
@@ -2252,463 +2259,20 @@ export default function AethelisOS() {
       );
 
       // ── Enterprise ─────────────────────────────────────────────────
-      case 'enterprise': {
-        const tabs: Array<'Logistics'|'CRM'|'Wealth'|'System'|'Scheduler'> = ['Logistics','CRM','Wealth','System','Scheduler'];
-        const tabIcons = { Logistics: Globe, CRM: Users, Wealth: BarChart3, System: Database, Scheduler: Timer };
-        return (
-          <div className="h-full flex flex-col bg-slate-950/92 text-white">
-            {/* Mobile: Horizontal scrollable tabs */}
-            <div className="shrink-0 bg-white/[0.025] border-b border-white/[0.07] p-2 sm:p-3 md:p-4 pb-2 md:pb-4">
-              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
-                {tabs.map(t => {
-                  const TI = tabIcons[t];
-                  const active = enterpriseTab === t;
-                  return (
-                    <button key={t} onClick={() => setEnterpriseTab(t)}
-                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-xs sm:text-[10px] font-medium transition-all shrink-0 min-h-[44px] ${
-                        active ? 'bg-violet-500/15 text-violet-300 border border-violet-500/30' : 'text-white/50 border border-transparent active:bg-white/[0.05]'
-                      }`}>
-                      <TI size={14} className={active ? 'text-violet-400' : 'text-white/30'} />
-                      <span>{t}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 p-3 sm:p-5 md:p-6 flex flex-col overflow-y-auto gap-4">
-              <div className="flex justify-between items-center shrink-0">
-                <h2 className="text-lg sm:text-xl font-light text-white/85">{enterpriseTab}</h2>
-                <div className="flex items-center gap-2">
-                  <button onClick={handleElsxSync}
-                    disabled={elsxSyncing}
-                    className="flex items-center gap-1.5 bg-violet-600/80 active:bg-violet-500 disabled:opacity-50 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-[10px] font-semibold transition-all min-h-[44px]">
-                    <RefreshCw size={14} className={`sm:hidden ${elsxSyncing ? 'animate-spin' : ''}`}/>
-                    <RefreshCw size={11} className={`hidden sm:inline ${elsxSyncing ? 'animate-spin' : ''}`}/>
-                    <span className="hidden sm:inline">{elsxSyncing ? 'Syncing...' : 'Sync Core Nodes'}</span>
-                    <span className="sm:hidden">{elsxSyncing ? 'Sync' : 'Sync'}</span>
-                  </button>
-                  {enterpriseTab === 'Logistics' && (
-                    <button onClick={() => setShowLogAdd(p => !p)}
-                      className="flex items-center gap-1.5 bg-violet-600 active:bg-violet-500 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-[10px] font-semibold transition-all min-h-[44px]">
-                      <Plus size={14} className="sm:hidden"/><Plus size={11} className="hidden sm:inline"/>
-                      <span className="hidden sm:inline">Add Order</span>
-                      <span className="sm:hidden">Add</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {enterpriseTab === 'Logistics' && (
-                <>
-                  {showLogAdd && (
-                    <div className="card-glass rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {(['node_id','route','delta'] as const).map(f => (
-                        <input key={f} placeholder={f === 'delta' ? 'Delta (₹)' : f === 'node_id' ? 'Node ID (e.g. TRX-0050)' : 'Route description'}
-                          value={logisticsForm[f]}
-                          onChange={e => setLogisticsForm(p => ({...p, [f]: e.target.value}))}
-                          className="input-glass rounded-lg px-3 py-2 text-[10px] text-white/80 placeholder-white/25 outline-none" />
-                      ))}
-                      <button onClick={addLogisticsOrder} className="sm:col-span-3 btn-glass bg-violet-600/80 hover:bg-violet-500/90 text-white py-2 rounded-lg text-[10px] font-semibold transition-all">Create Order</button>
-                    </div>
-                  )}
-                  <div className="card-glass rounded-2xl overflow-hidden flex-1">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[10px] text-left">
-                        <thead className="bg-white/[0.03] border-b border-white/[0.06] text-white/35">
-                          <tr>{['Node ID','Route','Delta','Status','Actions'].map(h=><th key={h} className="p-3.5 font-medium uppercase tracking-wider">{h}</th>)}</tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/[0.04]">
-                          {logistics.map(o => (
-                            <tr key={o.id} className="hover:bg-white/[0.025] transition-colors">
-                              <td className="p-3.5 font-mono text-violet-400">{o.node_id}</td>
-                              <td className="p-3.5 text-white/60">{o.route}</td>
-                              <td className={`p-3.5 font-mono ${o.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{o.delta >= 0 ? '+' : ''}{o.currency}{Math.abs(o.delta).toLocaleString()}</td>
-                              <td className="p-3.5">
-                                <select value={o.status} onChange={e => updateLogisticsStatus(o.id, e.target.value as LogisticsOrder['status'])}
-                                  className={`text-[9px] font-bold px-2 py-1 rounded-lg border bg-transparent cursor-pointer outline-none ${STATUS_META[o.status].cls}`}>
-                                  {Object.keys(STATUS_META).map(s=><option key={s} value={s} className="bg-slate-900 text-white">{STATUS_META[s].label}</option>)}
-                                </select>
-                              </td>
-                              <td className="p-3.5">
-                                <button onClick={() => setLogistics(p=>p.filter(x=>x.id!==o.id))} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={11}/></button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {logistics.length === 0 && <p className="text-center text-white/20 text-[10px] py-8">No orders. Add one above.</p>}
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {enterpriseTab === 'CRM' && (
-                <div className="space-y-3">
-                  {/* Pipeline Stage Summary */}
-                  <div className="grid grid-cols-5 gap-2">
-                    {(['New','Qualified','Proposal','Won','Lost'] as const).map(stage => {
-                      const count = elsxLeads.filter(l => l.stage === stage).length;
-                      const colors: Record<string, string> = { New: 'text-white/50', Qualified: 'text-sky-400', Proposal: 'text-amber-400', Won: 'text-emerald-400', Lost: 'text-red-400' };
-                      return (
-                        <div key={stage} className="card-glass rounded-xl p-2 text-center cursor-pointer hover:border-violet-500/20 transition-all"
-                          onClick={() => setElsxSortKey('stage')}>
-                          <p className={`text-lg font-mono font-light ${colors[stage]}`}>{count}</p>
-                          <p className="text-[7px] uppercase tracking-wider text-white/25">{stage}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* New Lead Form */}
-                  {showNewLead && (
-                    <div className="card-glass rounded-2xl p-4 border border-violet-500/30 space-y-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-semibold text-violet-300 uppercase tracking-wider">New Lead</span>
-                        <button onClick={() => setShowNewLead(false)} className="text-white/30 hover:text-white/60 transition-colors"><X size={14}/></button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input placeholder="Full Name *" value={newLeadForm.name}
-                          onChange={e => setNewLeadForm(p => ({ ...p, name: e.target.value }))}
-                          className="col-span-2 input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
-                        <input placeholder="Contact / Email" value={newLeadForm.contact}
-                          onChange={e => setNewLeadForm(p => ({ ...p, contact: e.target.value }))}
-                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
-                        <input placeholder="Revenue (₹)" type="number" value={newLeadForm.revenue}
-                          onChange={e => setNewLeadForm(p => ({ ...p, revenue: e.target.value }))}
-                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 placeholder-white/25 outline-none" />
-                        <select value={newLeadForm.stage}
-                          onChange={e => setNewLeadForm(p => ({ ...p, stage: e.target.value }))}
-                          className="input-glass rounded-xl px-3 py-2.5 text-[11px] text-white/80 outline-none bg-transparent col-span-2">
-                          {['New','Qualified','Proposal','Won','Lost'].map(s => <option key={s} value={s} className="bg-slate-900">{s}</option>)}
-                        </select>
-                      </div>
-                      <button onClick={handleAddLead} disabled={!newLeadForm.name.trim() || newLeadSaving}
-                        className="w-full py-2.5 rounded-xl bg-violet-600/30 border border-violet-500/40 text-violet-200 text-[11px] font-semibold
-                          hover:bg-violet-600/50 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
-                        {newLeadSaving ? <><RefreshCw size={12} className="animate-spin"/>Adding Lead...</> : <><Plus size={12}/>Add to Pipeline</>}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Search + Sort row */}
-                  <div className="flex gap-2 items-center">
-                    <div className="relative flex-1">
-                      <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/>
-                      <input placeholder="Search leads..." value={elsxSearch}
-                        onChange={e => setElsxSearch(e.target.value)}
-                        className="w-full rounded-xl pl-9 pr-3 py-2 text-[10px] text-white/80 placeholder-white/30 outline-none input-glass" />
-                    </div>
-                    <button onClick={() => setElsxSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                      className="p-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-white/50 hover:text-white/80 transition-colors flex items-center justify-center">
-                      {elsxSortDir === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}
-                    </button>
-                  </div>
-
-                  {/* Sort keys */}
-                  <div className="text-[8px] uppercase tracking-wider text-white/25 flex gap-4 px-1">
-                    {(['name','stage','revenue'] as const).map(k => (
-                      <button key={k} onClick={() => setElsxSortKey(k)}
-                        className={`hover:text-white/50 transition-colors ${elsxSortKey === k ? 'text-violet-400' : ''}`}>{k}</button>
-                    ))}
-                  </div>
-
-                  {/* Lead list */}
-                  {elsxLoading ? (
-                    Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="skeleton-glass h-16 flex items-center px-4">
-                        <div className="w-9 h-9 rounded-full bg-white/5"></div>
-                        <div className="flex-1 ml-4 space-y-1.5"><div className="h-2 w-24 bg-white/5 rounded"></div><div className="h-1.5 w-16 bg-white/5 rounded"></div></div>
-                      </div>
-                    ))
-                  ) : (
-                    elsxLeads
-                      .filter(l => !elsxSearch || [l.name, l.id, l.contact].some(v => v.toLowerCase().includes(elsxSearch.toLowerCase())))
-                      .sort((a, b) => {
-                        if (!elsxSortKey) return 0;
-                        if (elsxSortKey === 'revenue') {
-                          return elsxSortDir === 'asc'
-                            ? parseFloat(a.revenue.replace(/[^\d.]/g,'')) - parseFloat(b.revenue.replace(/[^\d.]/g,''))
-                            : parseFloat(b.revenue.replace(/[^\d.]/g,'')) - parseFloat(a.revenue.replace(/[^\d.]/g,''));
-                        }
-                        return elsxSortDir === 'asc' ? a[elsxSortKey].localeCompare(b[elsxSortKey]) : b[elsxSortKey].localeCompare(a[elsxSortKey]);
-                      })
-                      .map(lead => {
-                        const isSelected = selectedLeadId === lead.id;
-                        const stageCls = lead.stage === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                          : lead.stage === 'Lost' ? 'text-red-400 bg-red-500/10 border-red-500/20'
-                          : lead.stage === 'Proposal' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-                          : lead.stage === 'Qualified' ? 'text-sky-400 bg-sky-500/10 border-sky-500/20'
-                          : 'text-white/30 bg-white/[0.03] border-white/[0.06]';
-                        return (
-                          <div key={lead.id}>
-                            <div onClick={() => setSelectedLeadId(isSelected ? null : lead.id)}
-                              className={`card-glass rounded-2xl p-4 flex items-center gap-3 cursor-pointer transition-all duration-200
-                                ${isSelected ? 'border-violet-500/30 bg-violet-500/5' : 'hover:border-violet-500/20'}`}>
-                              <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center text-violet-400 text-[10px] font-bold shrink-0">
-                                {lead.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[11px] font-medium text-white/80">{lead.name}</p>
-                                <p className="text-[9px] text-white/35 truncate">{lead.id} · {lead.contact}</p>
-                              </div>
-                              <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${stageCls}`}>{lead.stage}</span>
-                              <span className="text-[10px] font-mono text-emerald-400 shrink-0">{lead.revenue}</span>
-                              <ChevronRight size={12} className={`text-white/20 transition-transform ${isSelected ? 'rotate-90' : ''}`} />
-                            </div>
-                            {/* Expanded detail */}
-                            {isSelected && (
-                              <div className="mx-2 mb-2 card-glass rounded-b-2xl p-3 border border-t-0 border-violet-500/20 bg-violet-500/5">
-                                <div className="grid grid-cols-2 gap-3 mb-3 text-[9px]">
-                                  <div><p className="text-white/30 mb-0.5">ID</p><p className="font-mono text-violet-300">{lead.id}</p></div>
-                                  <div><p className="text-white/30 mb-0.5">Contact</p><p className="text-white/60">{lead.contact}</p></div>
-                                  <div><p className="text-white/30 mb-0.5">Revenue</p><p className="text-emerald-400 font-mono">{lead.revenue}</p></div>
-                                  <div><p className="text-white/30 mb-0.5">Stage</p><p className={`font-semibold ${stageCls.split(' ')[0]}`}>{lead.stage}</p></div>
-                                </div>
-                                <div className="flex gap-2">
-                                  {(['New','Qualified','Proposal','Won','Lost'] as const).filter(s => s !== lead.stage).map(s => (
-                                    <button key={s} onClick={() => setElsxLeads(prev => prev.map(l => l.id === lead.id ? { ...l, stage: s } : l))}
-                                      className="flex-1 py-1.5 rounded-lg text-[8px] font-semibold border border-white/10 text-white/40 hover:border-violet-500/30 hover:text-violet-300 transition-all">
-                                      → {s}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                  )}
-
-                  {elsxLeads.length === 0 && !elsxLoading && (
-                    <div className="flex flex-col items-center justify-center py-10 text-white/20">
-                      <Users size={28} className="mb-2 opacity-30" />
-                      <p className="text-[10px]">No leads in pipeline</p>
-                      <button onClick={() => setShowNewLead(true)} className="mt-3 text-[9px] text-violet-400 hover:text-violet-300 transition-colors">+ Add first lead</button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {enterpriseTab === 'Wealth' && (
-                <div className="grid grid-cols-2 md:grid-cols-2 gap-4">
-                  {[
-                    { label: 'Liquid Assets',   value: '1,24,500', unit: 'ATH', color: 'text-amber-400' },
-                    { label: 'Locked Holdings', value: '89,200',   unit: 'ATH', color: 'text-violet-400' },
-                    { label: 'NFT Portfolio',   value: '42',       unit: 'items', color: 'text-sky-400' },
-                    { label: 'Monthly Yield',   value: '+18.4',    unit: '%',   color: 'text-emerald-400' },
-                  ].map(w => (
-                    <div key={w.label} className="bg-white/[0.04] border border-white/[0.07] rounded-2xl p-5">
-                      <p className="text-[9px] uppercase tracking-widest text-white/35 mb-2">{w.label}</p>
-                      <p className={`text-2xl font-light ${w.color}`}>{w.value} <span className="text-xs opacity-50">{w.unit}</span></p>
-                    </div>
-                  ))}
-                  <div className="col-span-2 bg-white/[0.04] border border-white/[0.07] rounded-2xl p-5">
-                    <p className="text-[9px] uppercase tracking-widest text-white/35 mb-3">Allocation</p>
-                    <div className="flex gap-1 h-3 rounded-full overflow-hidden">
-                      <div className="bg-amber-400 rounded-l-full" style={{width:'45%'}}></div>
-                      <div className="bg-violet-400" style={{width:'32%'}}></div>
-                      <div className="bg-sky-400" style={{width:'15%'}}></div>
-                      <div className="bg-emerald-400 rounded-r-full" style={{width:'8%'}}></div>
-                    </div>
-                    <div className="flex gap-4 mt-2.5 flex-wrap">
-                      {[{c:'bg-amber-400',l:'Liquid 45%'},{c:'bg-violet-400',l:'Locked 32%'},{c:'bg-sky-400',l:'NFT 15%'},{c:'bg-emerald-400',l:'Yield 8%'}].map(d=>(
-                        <div key={d.l} className="flex items-center gap-1.5"><div className={`w-2 h-2 rounded-sm ${d.c}`}></div><span className="text-[9px] text-white/40">{d.l}</span></div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {enterpriseTab === 'System' && (
-                <div className="space-y-3">
-                  {[
-                    { name: 'elsx-crm-daemon',   cpu: 2.1, mem: 148, status: 'running' },
-                    { name: 'bridge-monitor',    cpu: 0.8, mem: 64,  status: 'running' },
-                    { name: 'nexus-scanner',     cpu: 4.2, mem: 312, status: 'running' },
-                    { name: 'ledger-sync',       cpu: 0.3, mem: 42,  status: 'idle'    },
-                    { name: 'market-scraper',    cpu: 1.7, mem: 98,  status: 'running' },
-                  ].map(proc => (
-                    <div key={proc.name} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 flex items-center gap-4">
-                      <div className={`w-1.5 h-1.5 rounded-full ${proc.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`}></div>
-                      <span className="font-mono text-[10px] text-white/70 flex-1">{proc.name}</span>
-                      <span className="text-[9px] text-white/35 w-16 text-right">{proc.cpu}% CPU</span>
-                      <span className="text-[9px] text-white/35 w-16 text-right">{proc.mem} MB</span>
-                      <span className={`text-[8px] font-bold px-2 py-0.5 rounded ${proc.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-white/[0.04] text-white/25'}`}>{proc.status}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Phase 10: Autonomous Task Matrix */}
-              {enterpriseTab === 'Scheduler' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-400/70">Agentic Workflow Engine</p>
-                      <p className="text-white/30 text-[10px]">Autonomous background jobs that invoke compute workers on schedule.</p>
-                    </div>
-                    <button onClick={() => sendCommand({ type: 'SCHEDULER_GET_STATUS' })}
-                      className="flex items-center gap-1.5 border border-white/10 px-2.5 py-1 rounded-lg text-[9px] hover:bg-white/5 transition-colors">
-                      <RefreshCw size={9}/> Refresh
-                    </button>
-                  </div>
-                  {schedulerJobs.length === 0 ? (
-                    <div className="text-center py-8 text-white/20 text-[10px]">No scheduler jobs loaded. Click Refresh to fetch from daemon.</div>
-                  ) : schedulerJobs.map(job => (
-                    <div key={job.id} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 flex items-center gap-4">
-                      <div className={`w-1.5 h-1.5 rounded-full ${job.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`}></div>
-                      <div className="flex-1">
-                        <div className="font-mono text-[10px] text-white/70">{job.name}</div>
-                        <div className="text-[8px] text-white/30 mt-0.5">
-                          Every {job.intervalSec}s · {job.runCount} runs{job.lastRun ? ` · Last: ${new Date(job.lastRun).toLocaleTimeString()}` : ''}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (job.enabled) {
-                            sendCommand({ type: 'SCHEDULER_DISABLE_JOB', jobId: job.id });
-                          } else {
-                            sendCommand({ type: 'SCHEDULER_ENABLE_JOB', jobId: job.id });
-                          }
-                        }}
-                        className={`text-[8px] font-bold px-3 py-1.5 rounded-lg transition-colors ${job.enabled
-                          ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-                          : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
-                        {job.enabled ? 'Disable' : 'Enable'}
-                      </button>
-                    </div>
-                  ))}
-                  {schedulerEvent && (
-                    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-2 text-[9px] text-emerald-400/70 font-mono">
-                      {schedulerEvent.type === 'triggered' ? '>' : '✓'} {schedulerEvent.jobName} {schedulerEvent.type === 'triggered' ? 'triggered — invoking compute workers…' : 'completed.'}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      }
+      case 'enterprise':
+        return <ELSXApp leads={elsxLeads} shipments={elsxShipments} syncing={elsxSyncing} onSync={handleElsxSync} />;
 
       // ── Market ─────────────────────────────────────────────────────
-      case 'market': {
-        const META: Record<string, { desc: string; icon: React.ElementType; c: string; bg: string }> = {
-          'WP Backbone':     { desc: 'Sovereign CMS Engine',          icon: Globe,      c: 'text-sky-400',    bg: 'bg-sky-500/10' },
-          'Food Proxy':      { desc: 'Delivery Overlay Network',      icon: ShoppingBag,c: 'text-orange-400', bg: 'bg-orange-500/10' },
-          'Media Stream':    { desc: 'Decentralized OTT Platform',    icon: Play,       c: 'text-red-400',    bg: 'bg-red-500/10' },
-          'Auto-Legal':      { desc: 'Document Arbiter AI',           icon: FileText,   c: 'text-amber-400',  bg: 'bg-amber-500/10' },
-          'Nexus Bridge':    { desc: 'Encrypted Subnet Router',       icon: Radio,      c: 'text-violet-400', bg: 'bg-violet-500/10' },
-          'Sovereign Vault': { desc: 'Bio-linked Asset Storage',      icon: Lock,       c: 'text-emerald-400',bg: 'bg-emerald-500/10' },
-        };
+      case 'market':
         return (
-          <div className="p-5 md:p-7 h-full bg-slate-950/92 text-white overflow-y-auto">
-            <div className="mb-5">
-              <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-400/70 mb-0.5">Module Marketplace</p>
-              <h2 className="text-2xl font-light">Omni-Market</h2>
-              <p className="text-white/30 text-[10px] mt-0.5">Deploy sovereign functionalities into your planetary OS.</p>
-            </div>
-
-            {/* Deployment Progress Modal */}
-            {deployingModule && (
-              <div className="mb-4 card-glass rounded-2xl p-4 border border-emerald-500/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <RefreshCw size={12} className="animate-spin text-emerald-400"/>
-                  <span className="text-[10px] uppercase tracking-wider text-emerald-400">Deploying Module...</span>
-                  <span className="ml-auto text-[9px] font-mono text-white/40">{deployProgress.toFixed(0)}%</span>
-                </div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mb-3">
-                  <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300"
-                    style={{ width: `${deployProgress}%` }} />
-                </div>
-                <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                  {deployLogs.map((log, i) => (
-                    <div key={i} className="text-[8px] font-mono text-white/50">{log}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {dbLoading ? <p className="text-white/20 text-[10px] col-span-2">Loading modules…</p> : modules.map(mod => {
-                const meta = META[mod.module_name] ?? { desc: '', icon: Server, c: 'text-white/40', bg: 'bg-white/[0.05]' };
-                const MI = meta.icon;
-                const isDeploying = deployingModule === mod.id;
-                return (
-                  <div key={mod.id} className={`bg-white/[0.04] border p-4 rounded-2xl flex items-center gap-4 transition-all duration-300 ${isDeploying ? 'border-emerald-500/40' : 'border-white/[0.07] hover:border-white/15'}`}>
-                    <div className={`w-11 h-11 rounded-xl ${meta.bg} flex items-center justify-center ${meta.c} shrink-0`}><MI size={20}/></div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-semibold text-xs text-white/85">{mod.module_name}</h4>
-                      <p className="text-[9px] text-white/30 mt-0.5 mb-2">{meta.desc}</p>
-                      <button onClick={() => toggleModule(mod)} disabled={isDeploying}
-                        className={`px-3 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 transition-all duration-300 border active:scale-95
-                          ${mod.installed
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20'
-                            : 'bg-white/[0.06] hover:bg-white/[0.12] text-white/55 border-white/[0.06] hover:border-emerald-500/30'}`}>
-                        {isDeploying ? <><RefreshCw size={9} className="animate-spin"/>Deploying...</> : mod.installed ? <><CheckCircle size={9}/> Integrated</> : <><ArrowUpRight size={9}/> Deploy</>}
-                      </button>
-                    </div>
-                    {mod.installed_at && <span className="text-[8px] text-white/20 shrink-0">{new Date(mod.installed_at).toLocaleDateString()}</span>}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Hijacked Proxy Nodes (WordPress Bridge) */}
-            <div className="mt-6 sm:mt-8">
-              <div className="flex items-center gap-2 mb-3">
-                <Globe size={14} className="text-emerald-400/70" />
-                <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-400/70">Hijacked Proxy Nodes</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {wpLoading ? (
-                  Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="skeleton-glass h-28 p-4 flex flex-col gap-2">
-                      <div className="h-2 w-20 bg-white/5 rounded"></div>
-                      <div className="h-1.5 w-32 bg-white/5 rounded"></div>
-                      <div className="flex-1"></div>
-                      <div className="h-6 w-16 bg-white/5 rounded-lg"></div>
-                    </div>
-                  ))
-                ) : wpNodes.map(node => (
-                  <div key={node.id} className="card-glass rounded-2xl p-4 border border-white/[0.07]">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h4 className="font-semibold text-xs text-white/85">{node.name}</h4>
-                        <p className="text-[8px] text-white/30 font-mono mt-0.5">{node.url}</p>
-                      </div>
-                      <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${
-                        node.status === 'online' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                        : node.status === 'degraded' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-                        : 'text-red-400 bg-red-500/10 border-red-500/20'
-                      }`}>{node.status.toUpperCase()}</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-[9px] text-white/40 mb-3">
-                      <span>{node.orders} orders</span>
-                      <span className="text-emerald-400">{node.revenue}</span>
-                      <span className="text-white/30">{node.health.uptime}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full ${node.proxyEnabled ? 'bg-emerald-400' : 'bg-white/20'}`}></span>
-                        <span className="text-[8px] text-white/40">{node.proxyEnabled ? 'Proxy Active' : 'Proxy Disabled'}</span>
-                      </div>
-                      <button
-                        onClick={() => handleWpToggle(node.id, !node.proxyEnabled)}
-                        disabled={wpToggling === node.id}
-                        className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${node.proxyEnabled ? 'bg-emerald-500/60' : 'bg-white/10'}`}
-                      >
-                        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${node.proxyEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <OmniStoreApp
+            installedApps={installedApps}
+            onInstallApp={(appId) => setInstalledApps(prev => [...prev, appId])}
+            onUninstallApp={(appId) => setInstalledApps(prev => prev.filter(id => id !== appId))}
+          />
         );
-      }
+
+      // ── Ledger (Finance) ───────────────────────────────────────────
       case 'ledger': {
         const totalIn  = ledger.filter(t=>t.direction==='in').reduce((a,b)=>a+Number(b.amount),0);
         const totalOut = ledger.filter(t=>t.direction==='out').reduce((a,b)=>a+Number(b.amount),0);
@@ -3030,6 +2594,10 @@ export default function AethelisOS() {
           </div>
         </div>
       );
+
+      // ── Aether-Life (Social) ─────────────────────────────────────────
+      case 'aether-life':
+        return <AetherLifeApp />;
 
       // ── Vault ──────────────────────────────────────────────────────
       case 'vault':
@@ -5031,31 +4599,35 @@ export default function AethelisOS() {
           const WI = win.icon;
           const active = activeWindowId === win.id;
 
-          // Mobile: Full screen windows
-          // Desktop: Positioned windows with drag
+          // Mobile: Full screen windows with proper padding for dock
+          // Desktop: Positioned windows with drag, maximized respects menu bar + dock
+          const menuBarHeight = isMobile ? 32 : 32; // h-8 = 2rem = 32px
+          const dockHeight = isMobile ? 64 : 72; // Mobile dock ~64px, Desktop ~72px
           const windowStyle = isMobile ? {
             zIndex: win.zIndex,
             left: 0,
             top: 0,
             width: '100%',
-            height: '100%',
+            height: `calc(100dvh - ${dockHeight}px)`,
+            paddingBottom: `${dockHeight}px`,
           } : {
             zIndex: win.zIndex,
             left: win.isMaximized ? 0 : win.x,
-            top: win.isMaximized ? 36 : win.y,
+            top: win.isMaximized ? menuBarHeight : win.y,
             width: win.isMaximized ? '100%' : win.width,
-            height: win.isMaximized ? 'calc(100% - 80px)' : win.height,
+            height: win.isMaximized ? `calc(100dvh - ${menuBarHeight + dockHeight}px)` : win.height,
             transition: isDragging === win.id ? 'none' : 'left 0.22s cubic-bezier(0.2,0.8,0.2,1),top 0.22s cubic-bezier(0.2,0.8,0.2,1),width 0.22s,height 0.22s',
           };
 
           return (
             <div key={win.id} onMouseDown={() => bringToFront(win.id)} style={windowStyle}
+              data-window-frame="true"
               className={`absolute flex flex-col overflow-hidden
                 ${active ? 'window-glass' : 'window-glass-inactive'}
                 ${APP_NEON_BORDERS[win.id] || 'border-t-white/10'}
                 ${isMobile || win.isMaximized ? '!rounded-none !border-none' : 'rounded-2xl'}
               `}>
-              {/* Titlebar */}
+              {/* Titlebar - sticky, never scrolls */}
               <div
                 onMouseDown={isMobile ? undefined : e=>handleMouseDown(e,win.id)}
                 onDoubleClick={isMobile ? undefined : ()=>toggleMaximize(win.id)}
@@ -5143,8 +4715,8 @@ export default function AethelisOS() {
                 </div>
               </div>
 
-              {/* Content */}
-              <div className="flex-1 overflow-hidden relative">
+              {/* Content - overflow-y-auto here, not on window container */}
+              <div data-window-content="true" className={`flex-1 overflow-y-auto overflow-x-hidden relative ${isMobile ? 'pb-16' : ''}`}>
                 {!active && !isMobile && <div className="absolute inset-0 z-50 cursor-default"/>}
                 {renderApp(win.id)}
               </div>

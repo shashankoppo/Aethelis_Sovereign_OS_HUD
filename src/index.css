@@ -932,9 +932,20 @@ body::after {
     border-radius: 0 !important;
   }
 
-  /* Fix overflow scrolling */
+  /* Fix overflow scrolling - only content area scrolls */
   .overflow-y-auto {
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* Window container - no overflow, fixed frame */
+  [data-window-frame="true"] {
+    overflow: hidden;
+  }
+
+  /* Window content area - scrollable */
+  [data-window-content="true"] {
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   /* Larger titlebar on mobile */
